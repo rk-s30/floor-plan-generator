@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>エディター — 間取り図ジェネレーター</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="editor-root">
+
+  <!-- ===== Header ===== -->
+  <header class="editor-header">
+    <!-- Logo -->
+    <a href="index.html" class="header-logo" title="トップへ戻る">
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+           fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+        <polyline points="9 22 9 12 15 12 15 22"/>
+      </svg>
+      <span>間取り図</span>
+    </a>
+
+    <div class="header-divider"></div>
+
+    <!-- Filename -->
+    <div class="header-filename">
+      <input type="text" id="filename-input" value="無題の間取り図" spellcheck="false">
+    </div>
+
+    <div class="header-divider"></div>
+
+    <!-- Undo / Redo -->
+    <div class="header-actions">
+      <button class="btn-icon" id="btn-undo" title="元に戻す (Ctrl+Z)" disabled>
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="9 14 4 9 9 4"/>
+          <path d="M20 20v-7a4 4 0 0 0-4-4H4"/>
+        </svg>
+      </button>
+      <button class="btn-icon" id="btn-redo" title="やり直す (Ctrl+Y)" disabled>
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 14 20 9 15 4"/>
+          <path d="M4 20v-7a4 4 0 0 1 4-4h12"/>
+        </svg>
+      </button>
+
+      <div class="header-divider"></div>
+
+      <!-- Zoom -->
+      <div class="zoom-controls">
+        <button class="btn-icon" id="btn-zoom-out" title="縮小">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            <line x1="8" y1="11" x2="14" y2="11"/>
+          </svg>
+        </button>
+        <span class="zoom-display" id="zoom-display">100%</span>
+        <button class="btn-icon" id="btn-zoom-in" title="拡大">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            <line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
+          </svg>
+        </button>
+        <button class="btn-icon" id="btn-zoom-reset" title="表示をリセット">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+            <path d="M3 3v5h5"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="header-divider"></div>
+
+      <!-- Export -->
+      <button class="btn btn-ghost" id="btn-template">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+          <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+        </svg>
+        テンプレート
+      </button>
+
+      <button class="btn btn-ghost" id="btn-open" title="JSONファイルを開く">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        </svg>
+        開く
+      </button>
+      <input type="file" id="file-input-json" accept=".json" style="display:none">
+      <button class="btn btn-outline" id="btn-export-png">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        PNG
+      </button>
+      <button class="btn btn-primary" id="btn-save" title="保存 (Ctrl+S)">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+          <polyline points="17 21 17 13 7 13 7 21"/>
+          <polyline points="7 3 7 8 15 8"/>
+        </svg>
+        保存
+      </button>
+      <a class="btn btn-ghost" href="manual.html" target="_blank" title="使い方マニュアル">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        使用方法
+      </a>
+      <button class="btn-icon" id="btn-api-settings" title="Gemini APIキー設定（準備中）" disabled style="opacity:0.35;cursor:not-allowed;pointer-events:none">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ===== Toolbar (left) ===== -->
+  <aside class="editor-toolbar">
+
+    <div class="tool-group">
+      <!-- Select -->
+      <button class="tool-btn active" id="tool-select" data-tool="select" data-tip="選択 (V)">
+        <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 3l14 9-7 1-4 7z"/>
+        </svg>
+        <span class="tool-lbl">選択</span>
+      </button>
+    </div>
+
+    <div class="tool-sep"></div>
+
+    <div class="tool-group">
+      <!-- Room (rect) -->
+      <button class="tool-btn" id="tool-room" data-tool="room" data-tip="部屋を追加 (R)">
+        <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="1"/>
+        </svg>
+        <span class="tool-lbl">部屋</span>
+      </button>
+
+      <!-- Polygon room -->
+      <button class="tool-btn" id="tool-poly" data-tool="poly" data-tip="多角形の部屋 (P)">
+        <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 20 8 17 18 7 18 4 8"/>
+        </svg>
+        <span class="tool-lbl">多角形</span>
+      </button>
+
+      <!-- Wall (line) -->
+      <button class="tool-btn" id="tool-wall" data-tool="wall" data-tip="壁を描く (W)">
+        <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="4" y1="20" x2="20" y2="4"/>
+        </svg>
+        <span class="tool-lbl">壁</span>
+      </button>
+
+      <!-- Door -->
+      <button class="tool-btn" id="tool-door" data-tool="door" data-tip="ドア (D)">
+        <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13 4H6v16h16V11"/>
+          <path d="M13 4v7h7"/>
+        </svg>
+        <span class="tool-lbl">ドア</span>
+      </button>
+
+      <!-- Window -->
+      <button class="tool-btn" id="tool-window" data-tool="window" data-tip="窓 (N)">
+        <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="1"/>
+          <line x1="12" y1="3" x2="12" y2="21"/>
+          <line x1="3" y1="12" x2="21" y2="12"/>
+        </svg>
+        <span class="tool-lbl">窓</span>
+      </button>
+
+      <!-- Stairs -->
+      <button class="tool-btn" id="tool-stairs" data-tool="stairs" data-tip="階段 (S)">
+        <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="4 20 4 14 10 14 10 8 16 8 16 4 20 4"/>
+        </svg>
+        <span class="tool-lbl">階段</span>
+      </button>
+
+      <!-- Text -->
+      <button class="tool-btn" id="tool-text" data-tool="text" data-tip="テキスト (T)">
+        <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="4 7 4 4 20 4 20 7"/>
+          <line x1="9" y1="20" x2="15" y2="20"/>
+          <line x1="12" y1="4" x2="12" y2="20"/>
+        </svg>
+        <span class="tool-lbl">テキスト</span>
+      </button>
+    </div>
+
+    <div class="tool-sep"></div>
+
+    <!-- 家具・設備 -->
+    <div class="tool-group">
+      <button class="tool-btn" id="tool-toilet" data-tool="toilet" data-tip="トイレ">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="8" y="3" width="8" height="5" rx="1"/>
+          <ellipse cx="12" cy="15" rx="7" ry="7"/>
+          <ellipse cx="12" cy="15" rx="4" ry="4.5"/>
+        </svg>
+        <span class="tool-lbl">トイレ</span>
+      </button>
+      <button class="tool-btn" id="tool-bathtub" data-tool="bathtub" data-tip="バスタブ">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="5"/>
+          <ellipse cx="12" cy="12" rx="5" ry="6"/>
+        </svg>
+        <span class="tool-lbl">バスタブ</span>
+      </button>
+      <button class="tool-btn" id="tool-sink" data-tool="sink" data-tip="流し台">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="7" width="18" height="12" rx="2"/>
+          <rect x="6" y="10" width="12" height="6" rx="1"/>
+          <line x1="12" y1="5" x2="12" y2="7"/>
+          <circle cx="12" cy="13" r="1.2" fill="currentColor"/>
+        </svg>
+        <span class="tool-lbl">流し台</span>
+      </button>
+      <button class="tool-btn" id="tool-refrigerator" data-tool="refrigerator" data-tip="冷蔵庫">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="6" y="3" width="12" height="18" rx="2"/>
+          <line x1="6" y1="10" x2="18" y2="10"/>
+          <line x1="15" y1="6" x2="15" y2="9"/>
+          <line x1="15" y1="13" x2="15" y2="17"/>
+        </svg>
+        <span class="tool-lbl">冷蔵庫</span>
+      </button>
+      <button class="tool-btn" id="tool-washer" data-tool="washer" data-tip="洗濯機">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <line x1="3" y1="9" x2="21" y2="9"/>
+          <circle cx="12" cy="15" r="4"/>
+        </svg>
+        <span class="tool-lbl">洗濯機</span>
+      </button>
+      <button class="tool-btn" id="tool-stove" data-tool="stove" data-tip="コンロ">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="6" width="18" height="12" rx="2"/>
+          <circle cx="8.5" cy="10" r="2"/>
+          <circle cx="15.5" cy="10" r="2"/>
+          <circle cx="8.5" cy="15" r="2"/>
+          <circle cx="15.5" cy="15" r="2"/>
+        </svg>
+        <span class="tool-lbl">コンロ</span>
+      </button>
+    </div>
+
+    <div class="tool-sep"></div>
+
+    <div class="tool-group">
+      <!-- Delete selected -->
+      <button class="tool-btn" id="tool-delete" data-tip="削除 (Del)">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"/>
+          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+          <path d="M10 11v6"/><path d="M14 11v6"/>
+          <path d="M9 6V4h6v2"/>
+        </svg>
+        <span class="tool-lbl">削除</span>
+      </button>
+    </div>
+
+  </aside>
+
+  <!-- ===== Canvas ===== -->
+  <main class="editor-canvas-wrap" id="canvas-wrap">
+    <canvas id="floor-plan-canvas"></canvas>
+
+    <!-- Upload Overlay (shown when ?mode=upload) -->
+    <div id="upload-overlay" class="upload-overlay" style="display:none">
+      <div class="upload-dropzone" id="upload-dropzone">
+
+        <!-- Initial state: pick / drop -->
+        <div id="upload-idle">
+          <div class="upload-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+          </div>
+          <p class="upload-title">手描き図面をアップロード</p>
+          <p class="upload-sub">写真・スキャン画像をドラッグ＆ドロップ<br>または下のボタンから選択</p>
+          <input type="file" id="file-input-image" accept="image/*" style="display:none">
+          <button class="btn btn-primary" id="btn-pick-image">画像を選択</button>
+          <button class="btn btn-ghost" id="btn-skip-upload" style="margin-top:8px">スキップ（手動で作成）</button>
+        </div>
+
+        <!-- Preview state: image selected -->
+        <div id="upload-preview" style="display:none">
+          <img id="preview-img" class="upload-preview-img" src="" alt="preview">
+          <div class="upload-preview-actions">
+            <button class="btn btn-ghost" id="btn-change-image">画像を変更</button>
+            <button class="btn btn-primary" id="btn-analyze">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a10 10 0 1 0 10 10"/>
+                <path d="M12 6v6l4 2"/>
+              </svg>
+              AI で間取り図を生成
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="canvas-hint" id="canvas-hint">
+      左のツールバーから要素を選んでキャンバスをクリック
+    </div>
+  </main>
+
+  <!-- ===== Properties panel ===== -->
+  <aside class="editor-props">
+    <div class="props-header">プロパティ</div>
+    <div class="props-body" id="props-body">
+
+      <!-- Empty state -->
+      <div class="props-empty" id="props-empty">
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <span>オブジェクトを選択すると<br>プロパティが表示されます</span>
+      </div>
+
+      <!-- Object properties (shown when selected) -->
+      <div id="props-content" style="display:none;">
+
+        <!-- Object type badge -->
+        <div style="margin-bottom:12px;">
+          <span id="prop-type-badge" style="
+            display:inline-block;
+            background:var(--accent-dim);
+            color:var(--accent);
+            font-size:10px;
+            font-weight:600;
+            letter-spacing:0.5px;
+            padding:2px 8px;
+            border-radius:12px;
+            text-transform:uppercase;
+          ">—</span>
+        </div>
+
+        <!-- Room-only fields -->
+        <div id="prop-room-fields">
+          <div class="prop-group">
+            <label class="prop-label">部屋名</label>
+            <input class="prop-input" type="text" id="prop-label" placeholder="例: リビング">
+          </div>
+          <div class="prop-group">
+            <label class="prop-label">畳数・面積</label>
+            <input class="prop-input" type="text" id="prop-tatami" placeholder="例: 6畳 / 10.8㎡">
+          </div>
+          <div id="prop-scale-info" style="display:none">
+            <div class="scale-info-box">
+              <div class="scale-info-row">
+                <span class="scale-info-label">実寸参考</span>
+                <span class="scale-info-note">1グリッド = 910mm</span>
+              </div>
+              <div class="scale-info-value" id="scale-info-text"></div>
+              <button class="btn btn-ghost" id="btn-apply-scale"
+                      style="width:100%;justify-content:center;font-size:11px;margin-top:6px;border:1px solid var(--border);">
+                畳数欄に反映
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stairs-only fields -->
+        <div id="prop-stairs-fields" style="display:none;">
+          <div class="prop-group">
+            <label class="prop-label">方向</label>
+            <button class="btn btn-outline" id="btn-stairs-direction"
+                    style="width:100%;justify-content:center;font-size:12px;">
+              UP ↑
+            </button>
+          </div>
+        </div>
+
+
+        <!-- Common fields -->
+        <div class="prop-group">
+          <label class="prop-label">回転 (°)</label>
+          <div style="display:flex;gap:4px;align-items:center;">
+            <button class="btn btn-ghost" id="btn-rotate-ccw"
+                    title="90° 反時計回り ( [ )"
+                    style="padding:4px 7px;font-size:13px;border:1px solid var(--border);">↺</button>
+            <button class="btn btn-ghost" id="btn-rotate-cw"
+                    title="90° 時計回り ( ] )"
+                    style="padding:4px 7px;font-size:13px;border:1px solid var(--border);">↻</button>
+            <input class="prop-input" type="number" id="prop-angle"
+                   min="0" max="360" step="15" placeholder="0"
+                   style="flex:1;min-width:0;">
+            <button class="btn btn-ghost" id="btn-flip-h" title="左右反転"
+                    style="padding:4px 7px;font-size:11px;border:1px solid var(--border);">↔</button>
+            <button class="btn btn-ghost" id="btn-flip-v" title="上下反転"
+                    style="padding:4px 7px;font-size:11px;border:1px solid var(--border);">↕</button>
+          </div>
+          <!-- 水平/垂直への正規化 -->
+          <button class="btn btn-ghost" id="btn-snap-angle"
+                  title="水平・垂直に戻す (0)"
+                  style="margin-top:5px;width:100%;justify-content:center;
+                         border:1px solid var(--border);font-size:11px;gap:5px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="12" x2="21" y2="12"/>
+              <line x1="12" y1="3" x2="12" y2="21"/>
+            </svg>
+            水平・垂直に戻す
+          </button>
+        </div>
+
+        <div class="prop-group">
+          <label class="prop-label">塗りつぶし</label>
+          <div class="prop-colors" id="prop-fill-colors">
+            <div class="prop-color-swatch selected" data-color="#ffffff" style="background:#ffffff;border:1px solid #ddd" title="白"></div>
+            <div class="prop-color-swatch" data-color="#f3f0e8" style="background:#f3f0e8" title="クリーム"></div>
+            <div class="prop-color-swatch" data-color="#dbeafe" style="background:#dbeafe" title="水色"></div>
+            <div class="prop-color-swatch" data-color="#dcfce7" style="background:#dcfce7" title="薄緑"></div>
+            <div class="prop-color-swatch" data-color="#fef9c3" style="background:#fef9c3" title="薄黄"></div>
+            <div class="prop-color-swatch" data-color="#fce7f3" style="background:#fce7f3" title="ピンク"></div>
+            <div class="prop-color-swatch" data-color="transparent" style="background: repeating-linear-gradient(45deg,#ccc 0,#ccc 2px,#fff 0,#fff 50%) 0/8px 8px" title="透明"></div>
+          </div>
+        </div>
+
+        <div class="prop-group">
+          <label class="prop-label">枠線の色</label>
+          <div class="prop-colors" id="prop-stroke-colors">
+            <div class="prop-color-swatch selected" data-color="#1a1a1a" style="background:#1a1a1a" title="黒"></div>
+            <div class="prop-color-swatch" data-color="#374151" style="background:#374151" title="ダークグレー"></div>
+            <div class="prop-color-swatch" data-color="#6b7280" style="background:#6b7280" title="グレー"></div>
+            <div class="prop-color-swatch" data-color="#d97706" style="background:#d97706" title="オレンジ"></div>
+            <div class="prop-color-swatch" data-color="#2563eb" style="background:#2563eb" title="青"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===== Status bar ===== -->
+  <footer class="editor-status">
+    <span class="status-item" id="status-tool">ツール: 選択</span>
+    <div class="status-sep"></div>
+    <span class="status-item" id="status-pos">X: — &nbsp; Y: —</span>
+    <div class="status-sep"></div>
+    <span class="status-item" id="status-objects">オブジェクト: 0</span>
+    <div class="status-right">
+      <span class="status-item" style="color:var(--text-muted)">1グリッド = 910mm</span>
+      <div class="status-sep"></div>
+      <span class="status-item">
+        グリッド:
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
+          <input type="checkbox" id="toggle-grid" checked style="accent-color:var(--accent)">
+          表示
+        </label>
+      </span>
+      <span class="status-item">
+        スナップ:
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
+          <input type="checkbox" id="toggle-snap" checked style="accent-color:var(--accent)">
+          ON
+        </label>
+      </span>
+    </div>
+  </footer>
+
+</div><!-- /.editor-root -->
+
+
+<!-- API Key Modal -->
+<div class="modal-backdrop" id="modal-apikey" style="display:none">
+  <div class="modal">
+    <p class="modal-title">Gemini API キーの設定</p>
+    <p class="modal-sub">
+      Google AI Studio で取得した API キーを入力してください。<br>
+      キーはこのブラウザにのみ保存されます（サーバーには送信されません）。
+    </p>
+    <div class="prop-group">
+      <span class="prop-label">API キー</span>
+      <input type="password" class="prop-input" id="apikey-input"
+             placeholder="AIza..." autocomplete="off" spellcheck="false">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="modal-apikey-cancel">キャンセル</button>
+      <button class="btn btn-primary" id="modal-apikey-ok">保存して続ける</button>
+    </div>
+  </div>
+</div>
+
+<!-- Template Modal -->
+<div class="modal-backdrop" id="modal-template" style="display:none">
+  <div class="modal modal-template">
+    <p class="modal-title">テンプレートから始める</p>
+    <p class="modal-sub">レイアウトを選択してください。配置後に自由に編集できます。</p>
+    <div class="template-grid" id="template-grid"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="modal-template-cancel">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<!-- AI Analyzing Modal -->
+<div class="modal-backdrop" id="modal-analyzing" style="display:none">
+  <div class="modal" style="text-align:center;padding:40px 32px">
+    <div class="analyzing-spinner"></div>
+    <p class="modal-title" style="margin-top:20px">AI が解析中...</p>
+    <p class="modal-sub" style="margin-bottom:0">手描き図面をデジタル化しています</p>
+  </div>
+</div>
+
+<!-- Fabric.js CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+<script src="js/editor.js"></script>
+</body>
+</html>
