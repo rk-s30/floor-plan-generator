@@ -428,7 +428,7 @@ input, select, textarea { font-family: inherit; color: inherit; }
 
 .props-header {
   padding: 12px 14px 10px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.6px;
   text-transform: uppercase;
@@ -463,9 +463,9 @@ input, select, textarea { font-family: inherit; color: inherit; }
 }
 
 .prop-label {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-secondary);
-  margin-bottom: 5px;
+  margin-bottom: 6px;
   display: block;
 }
 
@@ -474,8 +474,8 @@ input, select, textarea { font-family: inherit; color: inherit; }
   background: var(--bg-base);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 5px 8px;
-  font-size: 12px;
+  padding: 7px 10px;
+  font-size: 14px;
   color: var(--text-primary);
   transition: border-color var(--transition);
 }
@@ -500,8 +500,8 @@ input, select, textarea { font-family: inherit; color: inherit; }
 }
 
 .prop-color-swatch {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   border-radius: 4px;
   cursor: pointer;
   border: 2px solid transparent;
@@ -636,18 +636,18 @@ input, select, textarea { font-family: inherit; color: inherit; }
   margin-bottom: 4px;
 }
 .scale-info-label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.4px;
 }
 .scale-info-note {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--text-muted);
 }
 .scale-info-value {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--accent);
   font-weight: 500;
 }
