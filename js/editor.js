@@ -1493,6 +1493,11 @@ function exportPng(multiplier, trim) {
   gridLines.forEach(l => canvas.remove(l));
   gridLines    = [];
 
+  // ズーム・パン状態に関わらず正確なバウンディングボックスを得るため
+  // ビューポートを一時的にリセットする
+  const wasVP = [...canvas.viewportTransform];
+  canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+
   let opts = { format: 'png', multiplier };
 
   if (trim) {
@@ -1507,15 +1512,18 @@ function exportPng(multiplier, trim) {
         maxX = Math.max(maxX, b.left + b.width);
         maxY = Math.max(maxY, b.top + b.height);
       });
-      opts.left   = Math.max(0, minX - pad);
-      opts.top    = Math.max(0, minY - pad);
-      opts.width  = Math.min(canvas.width  - opts.left, maxX + pad - opts.left);
-      opts.height = Math.min(canvas.height - opts.top,  maxY + pad - opts.top);
+      opts.left   = minX - pad;
+      opts.top    = minY - pad;
+      opts.width  = (maxX + pad) - opts.left;
+      opts.height = (maxY + pad) - opts.top;
     }
   }
 
   const dataURL = canvas.toDataURL(opts);
-  gridVisible   = wasVis;
+
+  // ビューポートを復元
+  canvas.setViewportTransform(wasVP);
+  gridVisible = wasVis;
   drawGrid();
   downloadDataURL(`${name}.png`, dataURL);
 }
