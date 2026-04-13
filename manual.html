@@ -797,15 +797,15 @@
         <div class="step">
           <div class="step-num" style="background:var(--bg-overlay);color:var(--text-secondary);">—</div>
           <div>
-            <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:2px;">回転・反転</div>
-            <div style="font-size:11px;color:var(--text-secondary);line-height:1.6">↺ ↻ で90°回転。↔ ↕ で左右・上下反転。角度入力も可能。「水平・垂直に戻す」でリセット。</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:2px;">テキストサイズ（部屋のみ）</div>
+            <div style="font-size:11px;color:var(--text-secondary);line-height:1.6">部屋の広さに合わせてフォントサイズが自動で調整されます。数値を入力すると手動で固定でき、「自動」ボタンを押すと自動調整に戻ります。部屋の枠・ラベルどちらを選択しても変更できます。</div>
           </div>
         </div>
         <div class="step">
           <div class="step-num" style="background:var(--bg-overlay);color:var(--text-secondary);">—</div>
           <div>
-            <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:2px;">壁の太さ（壁のみ）</div>
-            <div style="font-size:11px;color:var(--text-secondary);line-height:1.6">壁を選択したときのみ表示されます。1〜20px の範囲で調整できます。</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:2px;">回転・反転</div>
+            <div style="font-size:11px;color:var(--text-secondary);line-height:1.6">↺ ↻ で90°回転。↔ ↕ で左右・上下反転。角度入力も可能。「水平・垂直に戻す」でリセット。</div>
           </div>
         </div>
         <div class="step">
@@ -818,8 +818,15 @@
         <div class="step">
           <div class="step-num" style="background:var(--bg-overlay);color:var(--text-secondary);">—</div>
           <div>
+            <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:2px;">スナップ</div>
+            <div style="font-size:11px;color:var(--text-secondary);line-height:1.6">オブジェクトごとにグリッドスナップのON/OFFを切り替えられます。家具など細かく位置を調整したいときはOFFにすると便利です。</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num" style="background:var(--bg-overlay);color:var(--text-secondary);">—</div>
+          <div>
             <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:2px;">実寸参考（部屋のみ）</div>
-            <div style="font-size:11px;color:var(--text-secondary);line-height:1.6">1グリッド = 910mm をもとに実際のサイズ（m・㎡・畳数）を自動計算して表示します。「畳数欄に反映」ボタンで畳数フィールドにそのままセットできます。</div>
+            <div style="font-size:11px;color:var(--text-secondary);line-height:1.6">1グリッド = 455mm をもとに実際のサイズ（m・㎡・畳数）を自動計算して表示します。「畳数欄に反映」ボタンで畳数フィールドにそのままセットできます。</div>
           </div>
         </div>
       </div>
@@ -976,6 +983,17 @@
               <tr><td><span class="kbd">[</span></td><td>90° 反時計回り</td></tr>
               <tr><td><span class="kbd">]</span></td><td>90° 時計回り</td></tr>
               <tr><td><span class="kbd">0</span></td><td>水平・垂直に戻す</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">微調整・移動</div>
+        <div class="shortcut-wrap" style="margin-bottom:20px">
+          <table class="shortcut-table">
+            <thead><tr><th>キー</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr><td><span class="kbd">↑</span><span class="kbd">↓</span><span class="kbd">←</span><span class="kbd">→</span></td><td>1px 単位で微調整</td></tr>
+              <tr><td><span class="kbd">Shift</span>+矢印</td><td>1グリッド単位で移動</td></tr>
             </tbody>
           </table>
         </div>
