@@ -350,7 +350,7 @@ function addRoom(x, y, w, h, labelText = '部屋', tatamiText = '') {
     top:        y + h / 2,
     originX:    'center',
     originY:    'center',
-    fontSize:   13,
+    fontSize:   fitLabelFontSize(rect, displayText),
     fontFamily: 'Inter, sans-serif',
     fill:       '#1a1a1a',
     textAlign:  'center',
@@ -375,6 +375,35 @@ function buildRoomLabel(name, tatami) {
   return `${name}\n${tatami}`;
 }
 
+// Auto-calculate font size to fit text inside rectObj.
+// Returns rectObj.data.labelFontSize if user has set a manual override.
+function fitLabelFontSize(rectObj, text) {
+  if (rectObj.data?.labelFontSize) return rectObj.data.labelFontSize;
+  if (!text) return 13;
+  const availW = rectObj.getScaledWidth()  - 12;
+  const availH = rectObj.getScaledHeight() - 12;
+  if (availW <= 0 || availH <= 0) return 7;
+
+  const lines = text.split('\n');
+  const lineCount = lines.length;
+
+  // CJK chars ≈ fontSize px wide, ASCII/digits ≈ 0.6 × fontSize
+  function lineWidth(fs, str) {
+    let w = 0;
+    for (const ch of str) {
+      w += /[\u3000-\u9FFF\uFF00-\uFFEF]/.test(ch) ? fs : fs * 0.6;
+    }
+    return w;
+  }
+
+  for (let fs = 13; fs >= 7; fs--) {
+    const maxW   = Math.max(...lines.map(l => lineWidth(fs, l)));
+    const totalH = lineCount * fs * 1.4;
+    if (maxW <= availW && totalH <= availH) return fs;
+  }
+  return 7;
+}
+
 // Keep label centered on rect during move/scale/rotate
 // getCenterPoint() is rotation-aware and always returns the visual center
 function syncLabel(rectObj) {
@@ -382,7 +411,8 @@ function syncLabel(rectObj) {
   const lbl = canvas.getObjects().find(o => o._uid === rectObj._linkedLabelId);
   if (!lbl) return;
   const center = rectObj.getCenterPoint();
-  lbl.set({ left: center.x, top: center.y });
+  const fs = fitLabelFontSize(rectObj, lbl.text);
+  lbl.set({ left: center.x, top: center.y, fontSize: fs });
   canvas.renderAll();
 }
 
@@ -436,7 +466,7 @@ canvas.on('object:modified', (e) => {
   const obj = e.target;
   if (!obj || obj._isGrid) return;
 
-  if (snapEnabled) {
+  if (snapEnabled && !obj.data?.snapDisabled) {
     // 位置スナップ
     obj.set({
       left: snap(obj.left),
@@ -644,7 +674,7 @@ function closePolygon() {
   const label  = new fabric.IText('部屋', {
     left: center.x, top: center.y,
     originX: 'center', originY: 'center',
-    fontSize: 13, fontFamily: 'Inter, sans-serif',
+    fontSize: fitLabelFontSize(polyObj, '部屋'), fontFamily: 'Inter, sans-serif',
     fill: '#1a1a1a', textAlign: 'center', editable: true,
     lockScalingFlip: true,
     padding: 10,
@@ -1144,15 +1174,32 @@ function deleteSelected() {
 
 document.getElementById('btn-delete-selected').addEventListener('click', deleteSelected);
 
+// Per-object snap toggle
+document.getElementById('prop-snap-toggle').addEventListener('change', (e) => {
+  const obj = canvas.getActiveObject();
+  if (!obj || obj._isGrid) return;
+  const $snapLabel = document.getElementById('prop-snap-label');
+  if (e.target.checked) {
+    delete obj.data.snapDisabled;
+    $snapLabel.textContent = 'ON';
+  } else {
+    if (!obj.data) obj.data = {};
+    obj.data.snapDisabled = true;
+    $snapLabel.textContent = 'OFF';
+  }
+  saveHistory();
+});
+
 // -------------------------------------------------------
 // Properties panel
 // -------------------------------------------------------
 const $propsEmpty   = document.getElementById('props-empty');
 const $propsContent = document.getElementById('props-content');
-const $propLabel    = document.getElementById('prop-label');
-const $propTatami   = document.getElementById('prop-tatami');
-const $propAngle    = document.getElementById('prop-angle');
-const $typeBadge    = document.getElementById('prop-type-badge');
+const $propLabel         = document.getElementById('prop-label');
+const $propTatami        = document.getElementById('prop-tatami');
+const $propLabelFontsize = document.getElementById('prop-label-fontsize');
+const $propAngle         = document.getElementById('prop-angle');
+const $typeBadge         = document.getElementById('prop-type-badge');
 
 const TYPE_LABELS = {
   room: '部屋', wall: '壁', door: 'ドア',
@@ -1183,15 +1230,22 @@ function updatePropsPanel() {
   $propAngle.placeholder = freeRotation ? '0' : '0 / 90 / 180 / 270';
   $propAngle.value       = Math.round(obj.angle || 0);
 
-  // Show/hide room fields
-  const isRoom = objType === 'room';
-  document.getElementById('prop-room-fields').style.display = isRoom ? 'block' : 'none';
-  if (isRoom) {
-    $propLabel.value  = obj.data.label  || '';
-    $propTatami.value = obj.data.tatami || '';
-    updateScaleInfo(obj);
+  // Show/hide room fields (room rect OR room-label both show the panel)
+  const isRoom      = objType === 'room';
+  const isRoomLabel = objType === 'room-label';
+  const roomRect    = isRoom ? obj : (isRoomLabel ? getLinkedRect(obj) : null);
+  document.getElementById('prop-room-fields').style.display = roomRect ? 'block' : 'none';
+  if (roomRect) {
+    $propLabel.value  = roomRect.data.label  || '';
+    $propTatami.value = roomRect.data.tatami || '';
+    // Show current font size (manual override or auto-calculated)
+    const lbl = canvas.getObjects().find(o => o._uid === roomRect._linkedLabelId);
+    const currentFs = roomRect.data.labelFontSize || (lbl ? lbl.fontSize : 13);
+    $propLabelFontsize.value       = currentFs;
+    $propLabelFontsize.placeholder = roomRect.data.labelFontSize ? '' : '自動';
+    updateScaleInfo(roomRect);
   }
-  document.getElementById('prop-scale-info').style.display = isRoom ? 'block' : 'none';
+  document.getElementById('prop-scale-info').style.display = roomRect ? 'block' : 'none';
 
   // Show/hide stairs fields
   const isStairs = objType === 'stairs';
@@ -1201,6 +1255,13 @@ function updatePropsPanel() {
     document.getElementById('btn-stairs-direction').textContent =
       dir === 'up' ? 'UP ↑（クリックで DN に切替）' : 'DN ↓（クリックで UP に切替）';
   }
+
+  // Per-object snap toggle
+  const snapDisabled = obj.data?.snapDisabled || false;
+  const $snapToggle = document.getElementById('prop-snap-toggle');
+  const $snapLabel  = document.getElementById('prop-snap-label');
+  $snapToggle.checked    = !snapDisabled;
+  $snapLabel.textContent = snapDisabled ? 'OFF' : 'ON';
 
   // Swatches
   syncFillSwatches(obj.fill);
@@ -1212,12 +1273,25 @@ function clearPropsPanel() {
   $propsContent.style.display = 'none';
 }
 
+// Returns the room rect whether the selection is the rect itself or its label
+function getActiveRoom() {
+  const obj = canvas.getActiveObject();
+  if (!obj) return null;
+  if (obj.data?.type === 'room') return obj;
+  if (obj.data?.type === 'room-label') return getLinkedRect(obj);
+  return null;
+}
+
+function getLinkedRect(labelObj) {
+  return canvas.getObjects().find(o => o._uid === labelObj._linkedRectId) || null;
+}
+
 // Room label / tatami
 $propLabel.addEventListener('input', () => {
-  const obj = canvas.getActiveObject();
-  if (!obj || obj.data?.type !== 'room') return;
-  obj.data.label = $propLabel.value;
-  updateRoomLabelText(obj);
+  const rect = getActiveRoom();
+  if (!rect) return;
+  rect.data.label = $propLabel.value;
+  updateRoomLabelText(rect);
 });
 
 function updateScaleInfo(obj) {
@@ -1234,31 +1308,57 @@ function updateScaleInfo(obj) {
 }
 
 document.getElementById('btn-apply-scale').addEventListener('click', () => {
-  const obj = canvas.getActiveObject();
-  if (!obj || obj.data?.type !== 'room') return;
-  const wM = (obj.getScaledWidth()  / GRID_SIZE * GRID_MM / 1000);
-  const hM = (obj.getScaledHeight() / GRID_SIZE * GRID_MM / 1000);
+  const rect = getActiveRoom();
+  if (!rect) return;
+  const wM = (rect.getScaledWidth()  / GRID_SIZE * GRID_MM / 1000);
+  const hM = (rect.getScaledHeight() / GRID_SIZE * GRID_MM / 1000);
   const sqm = wM * hM;
   const tatami = sqm / TATAMI_SQM;
   const value = `約${tatami.toFixed(1)}畳 / ${sqm.toFixed(1)}㎡`;
   $propTatami.value   = value;
-  obj.data.tatami     = value;
-  updateRoomLabelText(obj);
+  rect.data.tatami    = value;
+  updateRoomLabelText(rect);
   saveHistory();
 });
 
 $propTatami.addEventListener('input', () => {
-  const obj = canvas.getActiveObject();
-  if (!obj || obj.data?.type !== 'room') return;
-  obj.data.tatami = $propTatami.value;
-  updateRoomLabelText(obj);
+  const rect = getActiveRoom();
+  if (!rect) return;
+  rect.data.tatami = $propTatami.value;
+  updateRoomLabelText(rect);
+});
+
+// Manual font size override
+$propLabelFontsize.addEventListener('change', () => {
+  const rect = getActiveRoom();
+  if (!rect) return;
+  const fs = parseInt($propLabelFontsize.value, 10);
+  if (!isNaN(fs) && fs >= 7 && fs <= 36) {
+    rect.data.labelFontSize = fs;
+    updateRoomLabelText(rect);
+    saveHistory();
+  }
+});
+
+// Reset to auto
+document.getElementById('btn-label-fontsize-auto').addEventListener('click', () => {
+  const rect = getActiveRoom();
+  if (!rect) return;
+  delete rect.data.labelFontSize;
+  updateRoomLabelText(rect);
+  // Reflect the auto-calculated value in the input
+  const lbl = canvas.getObjects().find(o => o._uid === rect._linkedLabelId);
+  if (lbl) $propLabelFontsize.value = lbl.fontSize;
+  saveHistory();
 });
 
 function updateRoomLabelText(rectObj) {
   if (!rectObj._linkedLabelId) return;
   const lbl = canvas.getObjects().find(o => o._uid === rectObj._linkedLabelId);
   if (!lbl) return;
-  lbl.set({ text: buildRoomLabel(rectObj.data.label, rectObj.data.tatami) });
+  const text = buildRoomLabel(rectObj.data.label, rectObj.data.tatami);
+  const fs   = fitLabelFontSize(rectObj, text);
+  lbl.set({ text, fontSize: fs });
   canvas.renderAll();
 }
 
@@ -1393,6 +1493,24 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '[') { e.preventDefault(); rotateBy90(-1);        return; }
   if (e.key === ']') { e.preventDefault(); rotateBy90(+1);        return; }
   if (e.key === '0') { e.preventDefault(); snapAngleToNearest90(); return; }
+
+  // 矢印キー移動: 通常=1px微調整, Shift=1グリッド(455mm)
+  if (['arrowup','arrowdown','arrowleft','arrowright'].includes(k)) {
+    const objs = canvas.getActiveObjects();
+    if (objs.length) {
+      e.preventDefault();
+      const step = e.shiftKey ? GRID_SIZE : 1;
+      const dx = k === 'arrowleft' ? -step : k === 'arrowright' ? step : 0;
+      const dy = k === 'arrowup'   ? -step : k === 'arrowdown'  ? step : 0;
+      objs.forEach(obj => {
+        obj.set({ left: obj.left + dx, top: obj.top + dy });
+        if (obj.data?.type === 'room') syncLabel(obj);
+      });
+      canvas.requestRenderAll();
+      saveHistory();
+    }
+    return;
+  }
 
   if (k === 'delete' || k === 'backspace') { deleteSelected(); return; }
   if (k === 'escape') {

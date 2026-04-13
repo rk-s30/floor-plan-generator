@@ -313,6 +313,40 @@ input, select, textarea { font-family: inherit; color: inherit; }
   background: rgba(239, 68, 68, 0.12);
 }
 
+/* Per-object snap toggle in properties panel */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.toggle-row input[type="checkbox"] { display: none; }
+.toggle-track {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  background: var(--border);
+  border-radius: 9px;
+  transition: background .2s;
+  flex-shrink: 0;
+}
+.toggle-row input:checked + .toggle-track { background: var(--accent); }
+.toggle-thumb {
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left .2s;
+}
+.toggle-row input:checked + .toggle-track .toggle-thumb { left: 16px; }
+.toggle-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 20px;
+}
+
 .prop-delete-group {
   margin-top: 8px;
   padding-top: 12px;

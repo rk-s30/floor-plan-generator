@@ -402,6 +402,18 @@
             <label class="prop-label">畳数・面積</label>
             <input class="prop-input" type="text" id="prop-tatami" placeholder="例: 6畳 / 10.8㎡">
           </div>
+          <div class="prop-group">
+            <label class="prop-label">テキストサイズ</label>
+            <div style="display:flex;gap:4px;align-items:center;">
+              <input class="prop-input" type="number" id="prop-label-fontsize"
+                     min="7" max="36" step="1" style="width:64px;text-align:center;">
+              <button class="btn btn-ghost" id="btn-label-fontsize-auto"
+                      title="部屋の広さに合わせて自動調整"
+                      style="flex:1;justify-content:center;font-size:11px;border:1px solid var(--border);">
+                自動
+              </button>
+            </div>
+          </div>
           <div id="prop-scale-info" style="display:none">
             <div class="scale-info-box">
               <div class="scale-info-row">
@@ -483,6 +495,16 @@
             <div class="prop-color-swatch" data-color="#d97706" style="background:#d97706" title="オレンジ"></div>
             <div class="prop-color-swatch" data-color="#2563eb" style="background:#2563eb" title="青"></div>
           </div>
+        </div>
+
+        <!-- Per-object snap toggle -->
+        <div class="prop-group" style="border-top:1px solid var(--border);padding-top:10px;margin-top:2px;">
+          <label class="prop-label">スナップ</label>
+          <label class="toggle-row" title="このオブジェクトのグリッドスナップを個別にON/OFFできます">
+            <input type="checkbox" id="prop-snap-toggle" checked>
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-label" id="prop-snap-label">ON</span>
+          </label>
         </div>
 
         <!-- Delete button -->
