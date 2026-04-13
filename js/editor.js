@@ -14,7 +14,7 @@
 // Constants
 // -------------------------------------------------------
 const GRID_SIZE       = 20;
-const GRID_MM         = 910;   // 1グリッド = 910mm（日本建築モジュール）
+const GRID_MM         = 455;   // 1グリッド = 455mm（半間）
 const TATAMI_SQM      = 1.62;  // 1畳 = 1.62㎡（公団畳基準）
 const ZOOM_STEP       = 0.1;
 const ZOOM_MIN        = 0.2;
@@ -1644,62 +1644,62 @@ document.getElementById('toggle-snap').addEventListener('change', (e) => {
 // -------------------------------------------------------
 // Templates
 // -------------------------------------------------------
-// テンプレートの部屋サイズは 1グリッド=910mm に基づく実寸スケール
-// 畳数計算: w × h × (0.91²/1.62) = w × h × 0.511
+// テンプレートの部屋サイズは 1グリッド=455mm（半間）に基づく実寸スケール
+// 畳数計算: w × h × (0.455²/1.62) = w × h × 0.1277
+// 6畳=8×6, 8畳=9×7, 10畳=10×8, 14畳=14×8
 const TEMPLATES = [
   {
     id: '1k', name: '1K', desc: '約22㎡ · 1部屋',
     rooms: [
-      // 洋室 4×3 → 3.64m×2.73m = 9.94㎡ = 6.1畳
-      { label:'洋室',     abbrev:'洋室', tatami:'6畳', x:0, y:0, w:4, h:3 },
-      { label:'キッチン', abbrev:'K',    tatami:'',    x:0, y:3, w:4, h:2 },
-      { label:'浴室',     abbrev:'浴',   tatami:'',    x:4, y:0, w:2, h:2, fill:'#dbeafe' },
-      { label:'洗面所',   abbrev:'洗',   tatami:'',    x:4, y:2, w:2, h:1 },
-      { label:'トイレ',   abbrev:'ト',   tatami:'',    x:4, y:3, w:2, h:2 },
-      { label:'玄関',     abbrev:'玄関', tatami:'',    x:0, y:5, w:6, h:1, fill:'#f3f0e8' },
+      // 洋室 8×6 → 3.64m×2.73m = 9.94㎡ = 6.1畳
+      { label:'洋室',     abbrev:'洋室', tatami:'6畳', x:0, y:0,  w:8, h:6 },
+      { label:'キッチン', abbrev:'K',    tatami:'',    x:0, y:6,  w:8, h:3 },
+      { label:'浴室',     abbrev:'浴',   tatami:'',    x:8, y:0,  w:4, h:4, fill:'#dbeafe' },
+      { label:'トイレ',   abbrev:'ト',   tatami:'',    x:8, y:4,  w:2, h:4 },
+      { label:'洗面所',   abbrev:'洗',   tatami:'',    x:10,y:4,  w:2, h:4 },
+      { label:'玄関',     abbrev:'玄関', tatami:'',    x:0, y:9,  w:12,h:2, fill:'#f3f0e8' },
     ]
   },
   {
     id: '1ldk', name: '1LDK', desc: '約35㎡ · 1部屋+LDK',
     rooms: [
-      // LDK 4×4 → 3.64m×3.64m = 13.25㎡ = 8.2畳
-      { label:'LDK',    abbrev:'LDK',  tatami:'8畳', x:0, y:0, w:4, h:4 },
-      // 洋室 4×3 → 9.94㎡ = 6.1畳
-      { label:'洋室',   abbrev:'洋室', tatami:'6畳', x:0, y:4, w:4, h:3 },
-      { label:'浴室',   abbrev:'浴',   tatami:'',    x:4, y:0, w:2, h:2, fill:'#dbeafe' },
-      { label:'洗面所', abbrev:'洗',   tatami:'',    x:4, y:2, w:2, h:2 },
-      { label:'トイレ', abbrev:'ト',   tatami:'',    x:4, y:4, w:2, h:3 },
-      { label:'玄関',   abbrev:'玄関', tatami:'',    x:0, y:7, w:6, h:1, fill:'#f3f0e8' },
+      // LDK 9×7 → 4.10m×3.19m = 13.05㎡ = 8.1畳
+      { label:'LDK',    abbrev:'LDK',  tatami:'8畳', x:0, y:0,  w:9,  h:7 },
+      // 洋室 8×6 → 9.94㎡ = 6.1畳
+      { label:'洋室',   abbrev:'洋室', tatami:'6畳', x:0, y:7,  w:8,  h:6 },
+      { label:'浴室',   abbrev:'浴',   tatami:'',    x:9, y:0,  w:4,  h:4, fill:'#dbeafe' },
+      { label:'洗面所', abbrev:'洗',   tatami:'',    x:9, y:4,  w:4,  h:3 },
+      { label:'トイレ', abbrev:'ト',   tatami:'',    x:9, y:7,  w:4,  h:6 },
+      { label:'玄関',   abbrev:'玄関', tatami:'',    x:0, y:13, w:13, h:2, fill:'#f3f0e8' },
     ]
   },
   {
     id: '2ldk', name: '2LDK', desc: '約45㎡ · 2部屋+LDK',
     rooms: [
-      // LDK 5×4 → 4.55m×3.64m = 16.56㎡ = 10.2畳
-      { label:'LDK',    abbrev:'LDK',  tatami:'10畳', x:0, y:0, w:5, h:4 },
-      // 洋室 4×3 → 9.94㎡ = 6.1畳
-      { label:'洋室①', abbrev:'洋①',  tatami:'6畳',  x:0, y:4, w:4, h:3 },
-      { label:'洋室②', abbrev:'洋②',  tatami:'6畳',  x:4, y:4, w:4, h:3 },
-      { label:'浴室',   abbrev:'浴',   tatami:'',     x:5, y:0, w:2, h:2, fill:'#dbeafe' },
-      { label:'洗面所', abbrev:'洗',   tatami:'',     x:5, y:2, w:2, h:2 },
-      { label:'トイレ', abbrev:'ト',   tatami:'',     x:7, y:0, w:1, h:2 },
-      { label:'玄関',   abbrev:'玄関', tatami:'',     x:0, y:7, w:8, h:1, fill:'#f3f0e8' },
+      // LDK 10×8 → 4.55m×3.64m = 16.56㎡ = 10.2畳
+      { label:'LDK',    abbrev:'LDK',  tatami:'10畳', x:0,  y:0,  w:10, h:8 },
+      // 洋室 7×7 → 3.19m×3.19m = 10.16㎡ = 6.3畳
+      { label:'洋室①', abbrev:'洋①',  tatami:'6畳',  x:0,  y:8,  w:7,  h:7 },
+      { label:'洋室②', abbrev:'洋②',  tatami:'6畳',  x:7,  y:8,  w:7,  h:7 },
+      { label:'浴室',   abbrev:'浴',   tatami:'',     x:10, y:0,  w:4,  h:4, fill:'#dbeafe' },
+      { label:'洗面所', abbrev:'洗',   tatami:'',     x:10, y:4,  w:4,  h:2 },
+      { label:'トイレ', abbrev:'ト',   tatami:'',     x:10, y:6,  w:4,  h:2 },
+      { label:'玄関',   abbrev:'玄関', tatami:'',     x:0,  y:15, w:14, h:2, fill:'#f3f0e8' },
     ]
   },
   {
     id: '3ldk', name: '3LDK', desc: '約65㎡ · 3部屋+LDK',
     rooms: [
-      // LDK 7×4 → 6.37m×3.64m = 23.2㎡ = 14.3畳
-      { label:'LDK',    abbrev:'LDK',  tatami:'14畳', x:0, y:0, w:7, h:4 },
-      // 洋室① 4×4 → 13.25㎡ = 8.2畳
-      { label:'洋室①', abbrev:'洋①',  tatami:'8畳',  x:0, y:4, w:4, h:4 },
-      // 洋室②③ 3×4 → 2.73m×3.64m = 9.94㎡ = 6.1畳
-      { label:'洋室②', abbrev:'洋②',  tatami:'6畳',  x:4, y:4, w:3, h:4 },
-      { label:'洋室③', abbrev:'洋③',  tatami:'6畳',  x:7, y:4, w:3, h:4 },
-      { label:'浴室',   abbrev:'浴',   tatami:'',     x:7, y:0, w:2, h:2, fill:'#dbeafe' },
-      { label:'洗面所', abbrev:'洗',   tatami:'',     x:7, y:2, w:2, h:2 },
-      { label:'トイレ', abbrev:'ト',   tatami:'',     x:9, y:0, w:1, h:2 },
-      { label:'玄関',   abbrev:'玄関', tatami:'',     x:0, y:8, w:10, h:1, fill:'#f3f0e8' },
+      // LDK 14×8 → 6.37m×3.64m = 23.2㎡ = 14.3畳
+      { label:'LDK',    abbrev:'LDK',  tatami:'14畳', x:0,  y:0,  w:14, h:8 },
+      // 洋室 6×8 → 2.73m×3.64m = 9.94㎡ = 6.1畳
+      { label:'洋室①', abbrev:'洋①',  tatami:'6畳',  x:0,  y:8,  w:6,  h:8 },
+      { label:'洋室②', abbrev:'洋②',  tatami:'6畳',  x:6,  y:8,  w:6,  h:8 },
+      { label:'洋室③', abbrev:'洋③',  tatami:'6畳',  x:12, y:8,  w:6,  h:8 },
+      { label:'浴室',   abbrev:'浴',   tatami:'',     x:14, y:0,  w:4,  h:4, fill:'#dbeafe' },
+      { label:'洗面所', abbrev:'洗',   tatami:'',     x:14, y:4,  w:4,  h:2 },
+      { label:'トイレ', abbrev:'ト',   tatami:'',     x:14, y:6,  w:4,  h:2 },
+      { label:'玄関',   abbrev:'玄関', tatami:'',     x:0,  y:16, w:18, h:2, fill:'#f3f0e8' },
     ]
   },
 ];
