@@ -1142,7 +1142,6 @@ function deleteSelected() {
   saveHistory();
 }
 
-document.getElementById('tool-delete').addEventListener('click', deleteSelected);
 document.getElementById('btn-delete-selected').addEventListener('click', deleteSelected);
 
 // -------------------------------------------------------
