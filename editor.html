@@ -301,6 +301,11 @@
   <main class="editor-canvas-wrap" id="canvas-wrap">
     <canvas id="floor-plan-canvas"></canvas>
 
+    <!-- Draw dimension tooltip -->
+    <div id="draw-dim-tooltip" style="display:none;position:absolute;pointer-events:none;
+         background:rgba(15,14,12,0.82);color:#f5f1eb;font-size:11px;font-family:Inter,sans-serif;
+         padding:3px 8px;border-radius:5px;white-space:nowrap;z-index:20;"></div>
+
     <!-- Upload Overlay (shown when ?mode=upload) -->
     <div id="upload-overlay" class="upload-overlay" style="display:none">
       <div class="upload-dropzone" id="upload-dropzone">
@@ -411,6 +416,19 @@
             <label class="prop-label">部屋名</label>
             <input class="prop-input" type="text" id="prop-label" placeholder="例: リビング">
           </div>
+          <div id="prop-scale-info" style="display:none">
+            <div class="scale-info-box">
+              <div class="scale-info-row">
+                <span class="scale-info-label">実寸参考</span>
+                <span class="scale-info-note">1グリッド = 455mm</span>
+              </div>
+              <div class="scale-info-value" id="scale-info-text"></div>
+              <button class="btn btn-ghost" id="btn-apply-scale"
+                      style="width:100%;justify-content:center;font-size:11px;margin-top:6px;border:1px solid var(--border);">
+                畳数欄に反映
+              </button>
+            </div>
+          </div>
           <div class="prop-group">
             <label class="prop-label">畳数・面積</label>
             <input class="prop-input" type="text" id="prop-tatami" placeholder="例: 6畳 / 10.8㎡">
@@ -424,19 +442,6 @@
                       title="部屋の広さに合わせて自動調整"
                       style="flex:1;justify-content:center;font-size:11px;border:1px solid var(--border);">
                 自動
-              </button>
-            </div>
-          </div>
-          <div id="prop-scale-info" style="display:none">
-            <div class="scale-info-box">
-              <div class="scale-info-row">
-                <span class="scale-info-label">実寸参考</span>
-                <span class="scale-info-note">1グリッド = 455mm</span>
-              </div>
-              <div class="scale-info-value" id="scale-info-text"></div>
-              <button class="btn btn-ghost" id="btn-apply-scale"
-                      style="width:100%;justify-content:center;font-size:11px;margin-top:6px;border:1px solid var(--border);">
-                畳数欄に反映
               </button>
             </div>
           </div>

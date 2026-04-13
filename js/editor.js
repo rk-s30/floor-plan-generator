@@ -44,7 +44,8 @@ let uidCounter   = 0;
 let isDirty      = false;
 
 // Drawing state (drag-to-draw)
-const draw = { active: false, preview: null, startPt: null, furPreview: null };
+const draw = { active: false, preview: null, startPt: null, furPreview: null,
+               wallRef: null, wallP1: null, wallP2: null, winT1: 0, winT2: 0 };
 
 // Wall multi-segment state
 const wall = { points: [], preview: null, activeLine: null };
@@ -272,7 +273,7 @@ function setTool(name) {
     poly:       'クリックで頂点を追加 / 最初の点をクリックまたは Enter で確定 / Esc でキャンセル',
     wall:       'クリックで壁の始点・終点を指定 / Esc でキャンセル',
     door:       'クリックで配置 / [ ] で回転',
-    window:     'クリックで配置 / [ ] で回転',
+    window:     '壁の上をドラッグして窓を挿入',
     stairs:     'クリックで配置 / [ ] で回転',
     text:       'クリックでテキストを配置 / ダブルクリックで編集',
     'wet-room':  'ドラッグで水回り部屋を描く',
@@ -346,6 +347,38 @@ function updateRoomDraw(pt) {
   const h = Math.abs(pt.y - draw.startPt.y);
   draw.preview.set({ left: x, top: y, width: Math.max(w, 1), height: Math.max(h, 1) });
   canvas.renderAll();
+  showDrawDimTooltip(pt, w, h);
+}
+
+function showDrawDimTooltip(pt, wPx, hPx) {
+  const tip = document.getElementById('draw-dim-tooltip');
+  if (!tip) return;
+  const wM = (wPx / GRID_SIZE * GRID_MM / 1000);
+  const hM = (hPx / GRID_SIZE * GRID_MM / 1000);
+  const sqm = wM * hM;
+  const wStr   = wM.toFixed(2).replace(/\.?0+$/, '');
+  const hStr   = hM.toFixed(2).replace(/\.?0+$/, '');
+  const sqmStr = sqm.toFixed(1);
+  tip.textContent = `${wStr}m × ${hStr}m ≈ ${sqmStr}㎡`;
+
+  // キャンバス要素の画面座標を基準に絶対配置
+  const canvasEl = document.getElementById('floor-plan-canvas');
+  const rect = canvasEl.getBoundingClientRect();
+  const zoom = canvas.getZoom();
+  const vpt  = canvas.viewportTransform;
+  const screenX = pt.x * zoom + vpt[4] + rect.left;
+  const screenY = pt.y * zoom + vpt[5] + rect.top;
+  const wrap    = document.getElementById('canvas-wrap');
+  const wrapRect = wrap.getBoundingClientRect();
+
+  tip.style.left    = `${screenX - wrapRect.left + 12}px`;
+  tip.style.top     = `${screenY - wrapRect.top  + 12}px`;
+  tip.style.display = 'block';
+}
+
+function hideDrawDimTooltip() {
+  const tip = document.getElementById('draw-dim-tooltip');
+  if (tip) tip.style.display = 'none';
 }
 
 function finishRoomDraw(pt) {
@@ -355,6 +388,7 @@ function finishRoomDraw(pt) {
   const w = Math.abs(pt.x - draw.startPt.x);
   const h = Math.abs(pt.y - draw.startPt.y);
 
+  hideDrawDimTooltip();
   canvas.remove(draw.preview);
   draw.active  = false;
   draw.preview = null;
@@ -455,6 +489,7 @@ function updateWetRoomDraw(pt) {
     _applyFurPreview(draw.furPreview, wetRoomType, x, y, w, h);
   }
   canvas.renderAll();
+  showDrawDimTooltip(pt, w, h);
 }
 
 function finishWetRoomDraw(pt) {
@@ -571,12 +606,15 @@ function recalcWetFurniture(rectObj) {
 }
 
 function cancelDrawing() {
+  hideDrawDimTooltip();
   if (draw.preview)    { canvas.remove(draw.preview); }
   if (draw.furPreview) { canvas.remove(draw.furPreview); draw.furPreview = null; }
   canvas.renderAll();
-  draw.active  = false;
-  draw.preview = null;
-  draw.startPt = null;
+  draw.active      = false;
+  draw.preview     = null;
+  draw.startPt     = null;
+  draw.wallRef     = null;
+  draw.wallSource  = null;
 }
 
 // -------------------------------------------------------
@@ -781,13 +819,23 @@ canvas.on('object:modified', (e) => {
       top:  snap(obj.top),
     });
 
-    // サイズスナップ（Line・テキスト以外）
-    if (obj.type !== 'line' && obj.type !== 'i-text' && obj.type !== 'text') {
+    // サイズスナップ（Line・テキスト・窓以外）
+    if (obj.type !== 'line' && obj.type !== 'i-text' && obj.type !== 'text'
+        && obj.data?.type !== 'window') {
       const snappedW = Math.max(snap(obj.getScaledWidth()),  MIN_ROOM_SIZE);
       const snappedH = Math.max(snap(obj.getScaledHeight()), MIN_ROOM_SIZE);
       obj.set({
         scaleX: snappedW / obj.width,
         scaleY: snappedH / obj.height,
+      });
+    }
+
+    // 窓：長さ方向のみスナップ、厚さは常に壁と同じに固定
+    if (obj.data?.type === 'window') {
+      const snappedW = Math.max(snap(obj.getScaledWidth()), GRID_SIZE);
+      obj.set({
+        scaleX: snappedW / obj.width,
+        scaleY: WALL_WIDTH / obj.height,
       });
     }
 
@@ -1202,36 +1250,193 @@ function addDoor(x, y) {
 }
 
 // -------------------------------------------------------
-// Window — click to place (wall-span rectangle with glass lines)
+// Window — drag along a wall to insert a window segment
 // -------------------------------------------------------
-function addWindow(x, y) {
-  const W = GRID_SIZE * 5; // 100px wide
-  const H = GRID_SIZE;     // 20px  tall
 
-  // Three objects: outer rect + two inner lines
-  // Coordinates are absolute; Fabric.js centers the group automatically
-  const outer = new fabric.Rect({
-    left: 0, top: 0, width: W, height: H,
-    fill: '#e0f2fe', stroke: '#1a1a1a', strokeWidth: 2,
-    strokeUniform: true,
-    originX: 'left', originY: 'top',
-  });
-  const lnTop = new fabric.Line([2, H * 0.33, W - 2, H * 0.33], {
-    stroke: '#64748b', strokeWidth: 1, strokeUniform: true,
-  });
-  const lnBot = new fabric.Line([2, H * 0.67, W - 2, H * 0.67], {
-    stroke: '#64748b', strokeWidth: 1, strokeUniform: true,
-  });
+// Get absolute canvas endpoints of a wall line (handles move/scale/rotation)
+// wall.x1/y1/x2/y2 are creation-time absolute coords; left/top is current center.
+// Convert to center-relative before applying the current transform matrix.
+function getWallEndpoints(wall) {
+  const cx0 = (wall.x1 + wall.x2) / 2;
+  const cy0 = (wall.y1 + wall.y2) / 2;
+  const t   = wall.calcTransformMatrix();
+  return [
+    fabric.util.transformPoint({ x: wall.x1 - cx0, y: wall.y1 - cy0 }, t),
+    fabric.util.transformPoint({ x: wall.x2 - cx0, y: wall.y2 - cy0 }, t),
+  ];
+}
 
-  const grp = new fabric.Group([outer, lnTop, lnBot], {
-    left: x, top: y,
-    data: { type: 'window' },
-    _uid: uid(),
-    subTargetCheck: false,
+// Project pt onto segment p1-p2, return t in [0,1]
+function projectOntoSegment(pt, p1, p2) {
+  const dx = p2.x - p1.x, dy = p2.y - p1.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1) return 0;
+  return Math.max(0, Math.min(1, ((pt.x - p1.x) * dx + (pt.y - p1.y) * dy) / len2));
+}
+
+function ptOnSegment(p1, p2, t) {
+  return { x: p1.x + t * (p2.x - p1.x), y: p1.y + t * (p2.y - p1.y) };
+}
+
+// 壁（Line）または部屋の辺（Rect）のうち最も近いものを返す
+// 戻り値: { isWall, obj, p1, p2 } または null
+function findNearestWallOrEdge(pt) {
+  let best = null, bestDist = 30;
+
+  canvas.getObjects().forEach(obj => {
+    if (obj._isGrid || obj._isPreview) return;
+
+    if (obj.data?.type === 'wall') {
+      const [p1, p2] = getWallEndpoints(obj);
+      const t = projectOntoSegment(pt, p1, p2);
+      const c = ptOnSegment(p1, p2, t);
+      const d = Math.hypot(pt.x - c.x, pt.y - c.y);
+      if (d < bestDist) { bestDist = d; best = { isWall: true, obj, p1, p2 }; }
+
+    } else if (obj.data?.type === 'room' && obj.type === 'rect') {
+      const corners = obj.getCoords();   // [TL, TR, BR, BL] in canvas coords
+      const edges = [
+        [corners[0], corners[1]],  // top
+        [corners[1], corners[2]],  // right
+        [corners[2], corners[3]],  // bottom
+        [corners[3], corners[0]],  // left
+      ];
+      edges.forEach(([a, b]) => {
+        const p1 = { x: a.x, y: a.y }, p2 = { x: b.x, y: b.y };
+        const t  = projectOntoSegment(pt, p1, p2);
+        const c  = ptOnSegment(p1, p2, t);
+        const d  = Math.hypot(pt.x - c.x, pt.y - c.y);
+        if (d < bestDist) { bestDist = d; best = { isWall: false, obj, p1, p2 }; }
+      });
+    }
+  });
+  return best;
+}
+
+function makeWallLine(p1, p2) {
+  return new fabric.Line([p1.x, p1.y, p2.x, p2.y], {
+    stroke: '#1a1a1a', strokeWidth: WALL_WIDTH,
+    strokeLineCap: 'square',
     strokeUniform: true, lockScalingFlip: true,
+    data: { type: 'wall' }, _uid: uid(),
   });
-  canvas.add(grp);
-  canvas.setActiveObject(grp);
+}
+
+// 引き違い窓記号（JIS断面記号）
+// 外枠（白抜き） ＋ 左パネル（上側・左〜中央オーバーラップ） ＋ 右パネル（下側・中央オーバーラップ〜右）
+function makeWindowObject(p1, p2) {
+  const len = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+  if (len < 4) return null;
+  const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x) * 180 / Math.PI;
+  const cx = (p1.x + p2.x) / 2, cy = (p1.y + p2.y) / 2;
+  const H  = WALL_WIDTH;
+  const hl = len / 2;                  // 半分の長さ
+  const ov = Math.max(3, len * 0.08);  // 中央オーバーラップ量
+
+  // 外枠：壁厚×開口幅の白抜き矩形（壁線を隠す）
+  const outer = new fabric.Rect({
+    left: -hl, top: -H / 2, width: len, height: H,
+    fill: '#ffffff', stroke: '#1a1a1a', strokeWidth: 1.5,
+    strokeUniform: true, originX: 'left', originY: 'top',
+  });
+
+  // 左パネル（上寄り）：左端〜中央+ov、縦範囲は上半分
+  const panel1 = new fabric.Rect({
+    left: -hl + 1, top: -H / 2 + 1, width: hl + ov, height: H / 2 - 1,
+    fill: '#ffffff', stroke: '#1a1a1a', strokeWidth: 1,
+    strokeUniform: true, originX: 'left', originY: 'top',
+  });
+
+  // 右パネル（下寄り）：中央-ov〜右端、縦範囲は下半分
+  const panel2 = new fabric.Rect({
+    left: -ov, top: 0, width: hl + ov - 1, height: H / 2 - 1,
+    fill: '#ffffff', stroke: '#1a1a1a', strokeWidth: 1,
+    strokeUniform: true, originX: 'left', originY: 'top',
+  });
+
+  return new fabric.Group([outer, panel1, panel2], {
+    left: cx, top: cy, angle,
+    originX: 'center', originY: 'center',
+    subTargetCheck: false, strokeUniform: true, lockScalingFlip: true,
+    data: { type: 'window' }, _uid: uid(),
+  });
+}
+
+function startWindowDraw(pt) {
+  const source = findNearestWallOrEdge(pt);
+  if (!source) return;
+
+  const { p1, p2 } = source;
+  const t = projectOntoSegment(pt, p1, p2);
+  const sp = ptOnSegment(p1, p2, t);
+  const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x) * 180 / Math.PI;
+
+  draw.active      = true;
+  draw.wallSource  = source;
+  draw.wallRef     = source.obj;   // keep for compat
+  draw.wallP1      = p1;
+  draw.wallP2      = p2;
+  draw.winT1   = t;
+  draw.winT2   = t;
+  draw.startPt = pt;
+
+  draw.preview = new fabric.Rect({
+    left: sp.x, top: sp.y, width: 1, height: WALL_WIDTH,
+    originX: 'center', originY: 'center', angle,
+    fill: 'rgba(59,130,246,0.35)', stroke: '#3b82f6', strokeWidth: 1,
+    selectable: false, evented: false, _isPreview: true,
+  });
+  canvas.add(draw.preview);
+  canvas.renderAll();
+}
+
+function updateWindowDraw(pt) {
+  if (!draw.active || !draw.preview || !draw.wallSource) return;
+  const { wallP1: p1, wallP2: p2 } = draw;
+  const t2   = projectOntoSegment(pt, p1, p2);
+  const tMin = Math.min(draw.winT1, t2);
+  const tMax = Math.max(draw.winT1, t2);
+  const sp = ptOnSegment(p1, p2, tMin);
+  const ep = ptOnSegment(p1, p2, tMax);
+  const len = Math.max(1, Math.hypot(ep.x - sp.x, ep.y - sp.y));
+  const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x) * 180 / Math.PI;
+
+  draw.winT2 = t2;
+  draw.preview.set({
+    left: (sp.x + ep.x) / 2, top: (sp.y + ep.y) / 2,
+    width: len, angle,
+  });
+  draw.preview.setCoords();
+  canvas.renderAll();
+}
+
+function finishWindowDraw(pt) {
+  if (!draw.active || !draw.wallSource) { cancelDrawing(); return; }
+
+  const { wallSource: source, wallP1: p1, wallP2: p2 } = draw;
+  const t2   = projectOntoSegment(pt, p1, p2);
+  const tMin = Math.min(draw.winT1, t2);
+  const tMax = Math.max(draw.winT1, t2);
+
+  canvas.remove(draw.preview);
+  draw.active      = false;
+  draw.preview     = null;
+  draw.startPt     = null;
+  draw.wallRef     = null;
+  draw.wallSource  = null;
+
+  const totalLen = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+  if (totalLen * (tMax - tMin) < GRID_SIZE) return;   // 短すぎる
+
+  const wp1 = ptOnSegment(p1, p2, tMin);
+  const wp2 = ptOnSegment(p1, p2, tMax);
+
+  // 壁・部屋辺どちらも窓シンボルを上に重ねるだけ（元の線は変更しない）
+  historyPaused = true;
+  const win = makeWindowObject(wp1, wp2);
+  historyPaused = false;
+  if (win) { canvas.add(win); canvas.setActiveObject(win); }
+
   updateObjectCount();
   canvas.renderAll();
   saveHistory();
@@ -1364,8 +1569,7 @@ canvas.on('mouse:down', (e) => {
       setTool('select');
       break;
     case 'window':
-      if (!e.target) addWindow(pt.x, pt.y);
-      setTool('select');
+      startWindowDraw(pt);
       break;
     case 'stairs':
       if (!e.target) addStairs(pt.x, pt.y);
@@ -1396,18 +1600,20 @@ canvas.on('mouse:down', (e) => {
 canvas.on('mouse:move', (e) => {
   if (isPanning) { doPan(e); return; }
   const pt = getPointer(e);
-  if (currentTool === 'room') updateRoomDraw(pt);
+  if (currentTool === 'room')     updateRoomDraw(pt);
   if (currentTool === 'wet-room') updateWetRoomDraw(pt);
-  if (currentTool === 'wall') updateWallDraw(pt);
-  if (currentTool === 'poly') updatePolyGuide(pt);
+  if (currentTool === 'wall')     updateWallDraw(pt);
+  if (currentTool === 'window')   updateWindowDraw(pt);
+  if (currentTool === 'poly')     updatePolyGuide(pt);
 });
 
 canvas.on('mouse:up', (e) => {
   if (isPanning) { stopPan(); return; }
   const pt = getPointer(e);
-  if (currentTool === 'room') finishRoomDraw(pt);
+  if (currentTool === 'room')     finishRoomDraw(pt);
   if (currentTool === 'wet-room') finishWetRoomDraw(pt);
-  if (currentTool === 'wall') finishWallDraw(pt);
+  if (currentTool === 'wall')     finishWallDraw(pt);
+  if (currentTool === 'window')   { finishWindowDraw(pt); setTool('select'); }
 });
 
 // Double-click on room rect → enter label editor
