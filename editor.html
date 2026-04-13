@@ -25,7 +25,7 @@
 
     <!-- Filename -->
     <div class="header-filename">
-      <input type="text" id="filename-input" value="無題の間取り図" spellcheck="false">
+      <input type="text" id="filename-input" value="" spellcheck="false">
     </div>
 
     <div class="header-divider"></div>
@@ -87,31 +87,31 @@
         テンプレート
       </button>
 
-      <button class="btn btn-ghost" id="btn-open" title="JSONファイルを開く">
+      <button class="btn btn-ghost" id="btn-open" title="前回保存した編集データを開いて再開する">
         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
              fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
         </svg>
-        開く
+        再開
       </button>
       <input type="file" id="file-input-json" accept=".json" style="display:none">
-      <button class="btn btn-outline" id="btn-export-png">
+      <button class="btn btn-outline" id="btn-export-png" title="間取り図を画像（PNG）として出力する">
         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
              fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
           <polyline points="7 10 12 15 17 10"/>
           <line x1="12" y1="15" x2="12" y2="3"/>
         </svg>
-        PNG
+        画像出力
       </button>
-      <button class="btn btn-primary" id="btn-save" title="保存 (Ctrl+S)">
+      <button class="btn btn-primary" id="btn-save" title="編集データを保存する (Ctrl+S)">
         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
              fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
           <polyline points="17 21 17 13 7 13 7 21"/>
           <polyline points="7 3 7 8 15 8"/>
         </svg>
-        保存
+        編集を保存
       </button>
       <a class="btn btn-ghost" href="manual.html" target="_blank" title="使い方マニュアル">
         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
@@ -346,6 +346,31 @@
     <div class="canvas-hint" id="canvas-hint">
       左のツールバーから要素を選んでキャンバスをクリック
     </div>
+
+    <!-- Welcome overlay (shown when canvas is empty) -->
+    <div class="welcome-overlay" id="welcome-overlay">
+      <div class="welcome-card">
+        <div class="welcome-title">間取り図を作成しましょう</div>
+        <div class="welcome-steps">
+          <div class="welcome-step">
+            <span class="welcome-step-num">1</span>
+            <span>テンプレートから始める（おすすめ）</span>
+          </div>
+          <div class="welcome-step">
+            <span class="welcome-step-num">2</span>
+            <span>左のツールバーの「部屋」でドラッグして描く</span>
+          </div>
+          <div class="welcome-step">
+            <span class="welcome-step-num">3</span>
+            <span>「再開」ボタンで前回の作業を続ける</span>
+          </div>
+        </div>
+        <div class="welcome-actions">
+          <button class="btn btn-primary" id="welcome-btn-template">テンプレートを選ぶ</button>
+          <button class="btn btn-ghost" id="welcome-btn-dismiss">自分で描く</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <!-- ===== Properties panel ===== -->
@@ -475,6 +500,20 @@
           </div>
         </div>
 
+        <!-- Delete button -->
+        <div class="prop-group prop-delete-group">
+          <button class="btn btn-danger" id="btn-delete-selected">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              <path d="M10 11v6M14 11v6"/>
+              <path d="M9 6V4h6v2"/>
+            </svg>
+            選択中のオブジェクトを削除
+          </button>
+        </div>
+
       </div>
     </div>
   </aside>
@@ -483,6 +522,8 @@
   <footer class="editor-status">
     <span class="status-item" id="status-tool">ツール: 選択</span>
     <div class="status-sep"></div>
+    <span class="status-item status-hint" id="status-hint"></span>
+    <div class="status-sep" id="status-hint-sep" style="display:none"></div>
     <span class="status-item" id="status-pos">X: — &nbsp; Y: —</span>
     <div class="status-sep"></div>
     <span class="status-item" id="status-objects">オブジェクト: 0</span>
@@ -549,6 +590,9 @@
     <p class="modal-sub" style="margin-bottom:0">手描き図面をデジタル化しています</p>
   </div>
 </div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
 
 <!-- Fabric.js CDN -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>

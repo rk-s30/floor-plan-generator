@@ -118,6 +118,16 @@ function drawGrid() {
 drawGrid();
 // 初期状態をスタックに積んでおく（最初のUndoが空キャンバスに戻れるように）
 undoStack.push(captureState());
+updateObjectCount();
+
+// ファイル名の初期値を「間取り図_YYYYMMDD」に設定
+(function initFilename() {
+  const d    = new Date();
+  const yyyy = d.getFullYear();
+  const mm   = String(d.getMonth() + 1).padStart(2, '0');
+  const dd   = String(d.getDate()).padStart(2, '0');
+  document.getElementById('filename-input').value = `間取り図_${yyyy}${mm}${dd}`;
+})();
 
 // -------------------------------------------------------
 // Snap helpers
@@ -186,6 +196,7 @@ function syncUndoButtons() {
 function updateObjectCount() {
   const n = canvas.getObjects().filter(o => !o._isGrid && !o._isPreview).length;
   document.getElementById('status-objects').textContent = `オブジェクト: ${n}`;
+  updateWelcomeOverlay(n);
 }
 
 // -------------------------------------------------------
@@ -238,6 +249,29 @@ function setTool(name) {
     `ツール: ${TOOL_LABELS[name] || name}`;
   document.getElementById('canvas-hint').style.display =
     isSelect ? 'block' : 'none';
+
+  // ステータスバーにヒントを表示
+  const TOOL_HINTS = {
+    select:     '',
+    room:       'ドラッグで部屋を描く',
+    poly:       'クリックで頂点を追加 / 最初の点をクリックまたは Enter で確定 / Esc でキャンセル',
+    wall:       'クリックで壁の始点・終点を指定 / Esc でキャンセル',
+    door:       'クリックで配置 / [ ] で回転',
+    window:     'クリックで配置 / [ ] で回転',
+    stairs:     'クリックで配置 / [ ] で回転',
+    text:       'クリックでテキストを配置 / ダブルクリックで編集',
+    toilet:     'クリックで配置 / [ ] で回転',
+    bathtub:    'クリックで配置 / [ ] で回転',
+    sink:       'クリックで配置 / [ ] で回転',
+    refrigerator: 'クリックで配置 / [ ] で回転',
+    washer:     'クリックで配置 / [ ] で回転',
+    stove:      'クリックで配置 / [ ] で回転',
+  };
+  const hint    = TOOL_HINTS[name] || '';
+  const $hint   = document.getElementById('status-hint');
+  const $hintSep= document.getElementById('status-hint-sep');
+  $hint.textContent       = hint;
+  $hintSep.style.display  = hint ? '' : 'none';
 }
 
 document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
@@ -1109,6 +1143,7 @@ function deleteSelected() {
 }
 
 document.getElementById('tool-delete').addEventListener('click', deleteSelected);
+document.getElementById('btn-delete-selected').addEventListener('click', deleteSelected);
 
 // -------------------------------------------------------
 // Properties panel
@@ -1447,6 +1482,7 @@ function saveProject() {
   );
   downloadBlob(`${name}.json`, json, 'application/json');
   isDirty = false;
+  showToast('編集データをダウンロードしました');
 }
 
 window.addEventListener('beforeunload', (e) => {
@@ -1526,6 +1562,7 @@ function exportPng(multiplier, trim) {
   gridVisible = wasVis;
   drawGrid();
   downloadDataURL(`${name}.png`, dataURL);
+  showToast('画像をダウンロードしました');
 }
 
 
@@ -1544,6 +1581,49 @@ function downloadDataURL(name, dataURL) {
   a.download = name;
   a.click();
 }
+
+// ----- Toast notification -----
+function showToast(message, type = 'success', duration = 2500) {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = `toast toast--${type}`;
+
+  const icon = document.createElement('span');
+  icon.className = 'toast-icon';
+  icon.textContent = type === 'success' ? '✓' : '✕';
+
+  const text = document.createElement('span');
+  text.textContent = message;
+
+  toast.appendChild(icon);
+  toast.appendChild(text);
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.classList.add('toast-out');
+    toast.addEventListener('animationend', () => toast.remove());
+  }, duration);
+}
+
+// ----- Welcome overlay -----
+function updateWelcomeOverlay(n) {
+  const el = document.getElementById('welcome-overlay');
+  if (!el) return;
+  if (n === 0) {
+    el.classList.remove('hidden');
+  } else {
+    el.classList.add('hidden');
+  }
+}
+
+document.getElementById('welcome-btn-template').addEventListener('click', () => {
+  document.getElementById('welcome-overlay').classList.add('hidden');
+  document.getElementById('btn-template').click();
+});
+
+document.getElementById('welcome-btn-dismiss').addEventListener('click', () => {
+  document.getElementById('welcome-overlay').classList.add('hidden');
+});
 
 // -------------------------------------------------------
 // Undo/Redo buttons
