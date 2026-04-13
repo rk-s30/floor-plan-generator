@@ -313,6 +313,39 @@ input, select, textarea { font-family: inherit; color: inherit; }
   background: rgba(239, 68, 68, 0.12);
 }
 
+/* Wet room flyout */
+.wet-flyout {
+  position: fixed;
+  z-index: 500;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  min-width: 110px;
+}
+.wet-flyout-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: 'Inter', sans-serif;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wet-flyout-item:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
 /* Per-object snap toggle in properties panel */
 .toggle-row {
   display: flex;

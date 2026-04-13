@@ -22,11 +22,19 @@ const ZOOM_MAX        = 4.0;
 const GRID_COLOR      = '#c8c4bc';
 const GRID_COLOR_MAJOR= '#aeaaa0';
 const MIN_ROOM_SIZE   = GRID_SIZE * 2;  // 40px minimum
+const WALL_WIDTH      = 6;             // default stroke width for walls and rooms
+// Fixed room widths for wet rooms (furniture fills this width)
+const WET_ROOM_W = {
+  toilet:  3 * GRID_SIZE,   // 60px = ~3グリッド ≒ 1365mm（トイレ室）
+  bathtub: 4 * GRID_SIZE,   // 80px = ~4グリッド ≒ 1820mm（浴室）
+  sink:    4 * GRID_SIZE,   // 80px = ~4グリッド ≒ 1820mm（洗面所）
+};
 
 // -------------------------------------------------------
 // State
 // -------------------------------------------------------
 let currentTool  = 'select';
+let wetRoomType  = 'toilet';   // active wet-room subtype
 let snapEnabled  = true;
 let gridVisible  = true;
 let undoStack    = [];
@@ -36,7 +44,7 @@ let uidCounter   = 0;
 let isDirty      = false;
 
 // Drawing state (drag-to-draw)
-const draw = { active: false, preview: null, startPt: null };
+const draw = { active: false, preview: null, startPt: null, furPreview: null };
 
 // Wall multi-segment state
 const wall = { points: [], preview: null, activeLine: null };
@@ -146,7 +154,7 @@ function getPointer(e) {
 function captureState() {
   // Serialize only non-grid objects
   const objects = canvas.getObjects().filter(o => !o._isGrid && !o._isPreview);
-  return JSON.stringify(canvas.toJSON(['data', '_uid', '_linkedLabelId', '_linkedRectId', '_isGrid']));
+  return JSON.stringify(canvas.toJSON(['data', '_uid', '_linkedLabelId', '_linkedRectId', '_isGrid', '_wetFurnitureId', '_wetFurnitureOffset', '_wetFurnitureInitAngle', '_wetFurnitureType']));
 }
 
 function saveHistory() {
@@ -162,6 +170,13 @@ function loadState(jsonStr) {
   historyPaused = true;
   canvas.loadFromJSON(JSON.parse(jsonStr), () => {
     historyPaused = false;
+    // Restore non-selectable state for wet room furniture
+    canvas.getObjects().forEach(o => {
+      if (o.data?.isWetFurniture) {
+        o.selectable = false;
+        o.evented    = false;
+      }
+    });
     drawGrid();
     updateObjectCount();
     clearPropsPanel();
@@ -260,6 +275,7 @@ function setTool(name) {
     window:     'クリックで配置 / [ ] で回転',
     stairs:     'クリックで配置 / [ ] で回転',
     text:       'クリックでテキストを配置 / ダブルクリックで編集',
+    'wet-room':  'ドラッグで水回り部屋を描く',
     toilet:     'クリックで配置 / [ ] で回転',
     bathtub:    'クリックで配置 / [ ] で回転',
     sink:       'クリックで配置 / [ ] で回転',
@@ -277,6 +293,33 @@ function setTool(name) {
 document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
   btn.addEventListener('click', () => setTool(btn.dataset.tool));
 });
+
+// Wet room flyout
+(function () {
+  const flyout = document.getElementById('wet-flyout');
+  const btnWet = document.getElementById('tool-wet-room');
+
+  btnWet.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const r = btnWet.getBoundingClientRect();
+    flyout.style.left    = (r.right + 6) + 'px';
+    flyout.style.top     = r.top + 'px';
+    flyout.style.display = flyout.style.display === 'none' ? 'flex' : 'none';
+  });
+
+  flyout.querySelectorAll('.wet-flyout-item').forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      wetRoomType = item.dataset.wet;
+      flyout.style.display = 'none';
+      setTool('wet-room');
+      // Reflect active state on button
+      btnWet.classList.add('active');
+    });
+  });
+
+  document.addEventListener('click', () => { flyout.style.display = 'none'; });
+})();
 
 // -------------------------------------------------------
 // Room — drag to draw
@@ -323,8 +366,214 @@ function finishRoomDraw(pt) {
   saveHistory();
 }
 
+// -------------------------------------------------------
+// Wet room — drag to draw
+// Width is fixed per type; user drags to set depth only.
+// -------------------------------------------------------
+// 家具プレビューの位置・スケール・角度を計算して適用する
+function _applyFurPreview(fur, type, roomX, roomY, w, h) {
+  const NAT_SIZE = { toilet: [40, 80], bathtub: [80, 120], sink: [80, 60] };
+  const pad = WALL_WIDTH + 4;
+  const availW = w - pad * 2, availH = h - pad * 2;
+  if (availW <= 0 || availH <= 0) return;
+
+  const [natW, natH] = NAT_SIZE[type];
+  const isLandscape  = w >= h;
+  let scaleX, scaleY, visualW, visualH;
+
+  if (type === 'toilet') {
+    const ASPECT = natW * 1.5 / natH;
+    if (!isLandscape) {
+      scaleX = Math.min(Math.sqrt(availW * availH / 4.5), availW) / natW;
+      scaleY = Math.min(scaleX * ASPECT, availH / natH);
+      if (scaleY < scaleX * ASPECT) scaleX = scaleY / ASPECT;
+    } else {
+      scaleX = Math.min(Math.sqrt(availW * availH / 4.5), availH) / natW;
+      scaleY = Math.min(scaleX * ASPECT, availW / natH);
+      if (scaleY < scaleX * ASPECT) scaleX = scaleY / ASPECT;
+    }
+    if (!isLandscape) { visualW = natW * scaleX; visualH = natH * scaleY; }
+    else              { visualW = natH * scaleY; visualH = natW * scaleX; }
+  } else if (type === 'bathtub') {
+    const sBase = Math.sqrt(availW * availH * 0.60 / (natW * natH));
+    if (!isLandscape) {
+      const s = Math.min(sBase, availW / natH, availH / natW);
+      scaleX = scaleY = s; visualW = natH * s; visualH = natW * s;
+    } else {
+      const s = Math.min(sBase, availW / natW, availH / natH);
+      scaleX = scaleY = s; visualW = natW * s; visualH = natH * s;
+    }
+  } else {
+    const sBase = Math.sqrt(availW * availH * 0.30 / (natW * natH));
+    if (!isLandscape) {
+      const s = Math.min(sBase, availW / natW, availH / natH);
+      scaleX = scaleY = s; visualW = natW * s; visualH = natH * s;
+    } else {
+      const s = Math.min(sBase, availW / natH, availH / natW);
+      scaleX = scaleY = s; visualW = natH * s; visualH = natW * s;
+    }
+  }
+
+  const furAngle  = type === 'bathtub'
+    ? (isLandscape ? 180 : 90)
+    : (isLandscape ? 90 : (type === 'toilet' ? 180 : 0));
+  const cxCanvas  = roomX + (!isLandscape ? w / 2 : w - visualW / 2 - pad);
+  const cyCanvas  = roomY + (!isLandscape ? h - visualH / 2 - pad : h / 2);
+
+  fur.set({ left: cxCanvas, top: cyCanvas, scaleX, scaleY, angle: furAngle });
+  fur.setCoords();
+}
+
+function startWetRoomDraw(pt) {
+  startRoomDraw(pt);
+  // 家具プレビューを生成（canvas には追加済み・選択不可）
+  const ADD_FN = { toilet: addToilet, bathtub: addBathtub, sink: addSink };
+  historyPaused = true;
+  ADD_FN[wetRoomType](0, 0);
+  historyPaused = false;
+  const fur = canvas.getActiveObject();
+  if (fur) {
+    fur.set({
+      selectable: false, evented: false,
+      originX: 'center', originY: 'center',
+      opacity: 0.55,
+      _isPreview: true,
+    });
+    draw.furPreview = fur;
+  }
+  canvas.discardActiveObject();
+}
+
+function updateWetRoomDraw(pt) {
+  if (!draw.active || !draw.preview) return;
+  const x = Math.min(draw.startPt.x, pt.x);
+  const y = Math.min(draw.startPt.y, pt.y);
+  const w = Math.abs(pt.x - draw.startPt.x);
+  const h = Math.abs(pt.y - draw.startPt.y);
+  draw.preview.set({ left: x, top: y, width: Math.max(w, 1), height: Math.max(h, 1) });
+  if (draw.furPreview && w >= MIN_ROOM_SIZE && h >= MIN_ROOM_SIZE) {
+    _applyFurPreview(draw.furPreview, wetRoomType, x, y, w, h);
+  }
+  canvas.renderAll();
+}
+
+function finishWetRoomDraw(pt) {
+  if (!draw.active) return;
+  const x = Math.min(draw.startPt.x, pt.x);
+  const y = Math.min(draw.startPt.y, pt.y);
+  const w = Math.abs(pt.x - draw.startPt.x);
+  const h = Math.abs(pt.y - draw.startPt.y);
+
+  canvas.remove(draw.preview);
+  if (draw.furPreview) { canvas.remove(draw.furPreview); draw.furPreview = null; }
+  draw.active  = false;
+  draw.preview = null;
+  draw.startPt = null;
+
+  if (w < MIN_ROOM_SIZE || h < MIN_ROOM_SIZE) return;
+
+  addWetRoom(x, y, w, h, wetRoomType);
+  setTool('select');
+  saveHistory();
+}
+
+function addWetRoom(x, y, w, h, type) {
+  const LABELS = { toilet: 'トイレ', bathtub: '浴室', sink: '洗面所' };
+  const ADD_FN = { toilet: addToilet, bathtub: addBathtub, sink: addSink };
+
+  historyPaused = true;
+  const rect = addRoom(x, y, w, h, LABELS[type], '');
+  historyPaused = false;
+
+  historyPaused = true;
+  ADD_FN[type](0, 0);
+  historyPaused = false;
+
+  const furniture = canvas.getActiveObject();
+  if (furniture) {
+    furniture.set({ selectable: false, evented: false, originX: 'center', originY: 'center' });
+    furniture.data = { ...furniture.data, isWetFurniture: true };
+    rect._wetFurnitureId   = furniture._uid;
+    rect._wetFurnitureType = type;
+    recalcWetFurniture(rect);  // syncLabel も内部で呼ばれる
+    canvas.renderAll();
+  }
+}
+
+// 部屋サイズに合わせて家具スケール・位置・角度を再計算する
+function recalcWetFurniture(rectObj) {
+  if (!rectObj._wetFurnitureId || !rectObj._wetFurnitureType) return;
+  const fur = canvas.getObjects().find(o => o._uid === rectObj._wetFurnitureId);
+  if (!fur) return;
+
+  const type = rectObj._wetFurnitureType;
+  const w    = rectObj.getScaledWidth();
+  const h    = rectObj.getScaledHeight();
+  const NAT_SIZE = { toilet: [40, 80], bathtub: [80, 120], sink: [80, 60] };
+  const pad  = WALL_WIDTH + 4;
+  const availW = w - pad * 2;
+  const availH = h - pad * 2;
+  if (availW <= 0 || availH <= 0) return;
+
+  const [natW, natH] = NAT_SIZE[type];
+  const isLandscape  = w >= h;
+  let scaleX, scaleY, visualW, visualH;
+
+  if (type === 'toilet') {
+    const ASPECT = natW * 1.5 / natH;
+    if (!isLandscape) {
+      scaleX = Math.min(Math.sqrt(availW * availH / 4.5), availW) / natW;
+      scaleY = Math.min(scaleX * ASPECT, availH / natH);
+      if (scaleY < scaleX * ASPECT) scaleX = scaleY / ASPECT;
+    } else {
+      scaleX = Math.min(Math.sqrt(availW * availH / 4.5), availH) / natW;
+      scaleY = Math.min(scaleX * ASPECT, availW / natH);
+      if (scaleY < scaleX * ASPECT) scaleX = scaleY / ASPECT;
+    }
+  } else if (type === 'bathtub') {
+    const sBase = Math.sqrt(availW * availH * 0.60 / (natW * natH));
+    if (!isLandscape) {
+      const s = Math.min(sBase, availW / natH, availH / natW);
+      scaleX = scaleY = s; visualW = natH * s; visualH = natW * s;
+    } else {
+      const s = Math.min(sBase, availW / natW, availH / natH);
+      scaleX = scaleY = s; visualW = natW * s; visualH = natH * s;
+    }
+  } else {
+    // 洗面所：部屋面積の約30%（縦長=0°、横長=90°回転）
+    const sBase = Math.sqrt(availW * availH * 0.30 / (natW * natH));
+    if (!isLandscape) {
+      scaleX = scaleY = Math.min(sBase, availW / natW, availH / natH);
+    } else {
+      scaleX = scaleY = Math.min(sBase, availW / natH, availH / natW);
+    }
+  }
+
+  if (type !== 'bathtub') {
+    if (!isLandscape) { visualW = natW * scaleX; visualH = natH * scaleY; }
+    else              { visualW = natH * scaleY; visualH = natW * scaleX; }
+  }
+
+  const furAngle = type === 'bathtub'
+    ? (isLandscape ? 180 : 90)
+    : (isLandscape ? 90 : (type === 'toilet' ? 180 : 0));
+
+  // 部屋中心からの相対オフセット（ローカル座標）を更新
+  const cxLocal = !isLandscape ? w / 2 : w - visualW / 2 - pad;
+  const cyLocal = !isLandscape ? h - visualH / 2 - pad : h / 2;
+  rectObj._wetFurnitureOffset    = { dx: cxLocal - w / 2, dy: cyLocal - h / 2 };
+  rectObj._wetFurnitureInitAngle = furAngle;
+
+  fur.set({ scaleX, scaleY });
+  fur.setCoords();
+  syncWetFurniture(rectObj);
+  syncLabel(rectObj);
+}
+
 function cancelDrawing() {
-  if (draw.preview) { canvas.remove(draw.preview); canvas.renderAll(); }
+  if (draw.preview)    { canvas.remove(draw.preview); }
+  if (draw.furPreview) { canvas.remove(draw.furPreview); draw.furPreview = null; }
+  canvas.renderAll();
   draw.active  = false;
   draw.preview = null;
   draw.startPt = null;
@@ -338,7 +587,7 @@ function addRoom(x, y, w, h, labelText = '部屋', tatamiText = '') {
 
   const rect = new fabric.Rect({
     left: x, top: y, width: w, height: h,
-    fill: '#ffffff', stroke: '#1a1a1a', strokeWidth: 2,
+    fill: '#ffffff', stroke: '#1a1a1a', strokeWidth: WALL_WIDTH,
     strokeUniform: true, lockScalingFlip: true,
     data: { type: 'room', label: labelText, tatami: tatamiText },
     _uid: id, _linkedLabelId: id + '_lbl',
@@ -410,10 +659,69 @@ function syncLabel(rectObj) {
   if (!rectObj._linkedLabelId) return;
   const lbl = canvas.getObjects().find(o => o._uid === rectObj._linkedLabelId);
   if (!lbl) return;
+
   const center = rectObj.getCenterPoint();
   const fs = fitLabelFontSize(rectObj, lbl.text);
-  lbl.set({ left: center.x, top: center.y, fontSize: fs });
+
+  if (rectObj._wetFurnitureOffset && rectObj._wetFurnitureId) {
+    // 水回り部屋：家具の実際のサイズから空き領域を算出してラベルを配置
+    const w = rectObj.getScaledWidth();
+    const h = rectObj.getScaledHeight();
+    const isLandscape = w >= h;
+    const { dx, dy } = rectObj._wetFurnitureOffset;
+
+    // 家具の視覚サイズ（部屋ローカル軸で見た半分）を取得
+    const fur = canvas.getObjects().find(o => o._uid === rectObj._wetFurnitureId);
+    let furHalfH = 20, furHalfW = 20;
+    if (fur) {
+      const relAngle = ((fur.angle - (rectObj.angle || 0)) % 360 + 360) % 360;
+      const swapped  = relAngle === 90 || relAngle === 270;
+      furHalfH = (swapped ? fur.getScaledWidth()  : fur.getScaledHeight()) / 2;
+      furHalfW = (swapped ? fur.getScaledHeight() : fur.getScaledWidth())  / 2;
+    }
+
+    let dxLocal, dyLocal;
+    if (!isLandscape) {
+      // 家具は下側：空き領域は (0 〜 家具上端)
+      const furTopLocal  = h / 2 + dy - furHalfH;   // 部屋中央基準で家具上端
+      dyLocal = furTopLocal / 2 - h / 2;             // 空き領域中央 → center 基準
+      dxLocal = 0;
+    } else {
+      // 家具は右側：空き領域は (0 〜 家具左端)
+      const furLeftLocal = w / 2 + dx - furHalfW;
+      dxLocal = furLeftLocal / 2 - w / 2;
+      dyLocal = 0;
+    }
+
+    const rad = fabric.util.degreesToRadians(rectObj.angle || 0);
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    lbl.set({
+      left:     center.x + cos * dxLocal - sin * dyLocal,
+      top:      center.y + sin * dxLocal + cos * dyLocal,
+      fontSize: fs,
+    });
+    canvas.bringToFront(lbl);
+  } else {
+    lbl.set({ left: center.x, top: center.y, fontSize: fs });
+  }
   canvas.renderAll();
+}
+
+// Keep wet room furniture linked to its room rect
+function syncWetFurniture(rectObj) {
+  if (!rectObj._wetFurnitureId) return;
+  const fur = canvas.getObjects().find(o => o._uid === rectObj._wetFurnitureId);
+  if (!fur) return;
+  const { dx, dy } = rectObj._wetFurnitureOffset;
+  const center = rectObj.getCenterPoint();
+  const rad = fabric.util.degreesToRadians(rectObj.angle || 0);
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  fur.set({
+    left:  center.x + cos * dx - sin * dy,
+    top:   center.y + sin * dx + cos * dy,
+    angle: (rectObj._wetFurnitureInitAngle || 0) + (rectObj.angle || 0),
+  });
+  fur.setCoords();
 }
 
 // -------------------------------------------------------
@@ -446,19 +754,19 @@ canvas.on('selection:cleared', ()  => applyRotationSnapSetting(null));
 
 // ドラッグ中：ラベル同期のみ（スナップはしない）
 canvas.on('object:moving', (e) => {
-  if (e.target.data?.type === 'room') syncLabel(e.target);
+  if (e.target.data?.type === 'room') { syncLabel(e.target); syncWetFurniture(e.target); }
 });
 
 // スケール中：ラベル同期のみ（スナップはしない）
 // ※スケール途中に scaleX/Y を書き換えると Fabric.js の内部状態と衝突し
 //   オブジェクトが飛ぶため、修正は mouse:up 後の object:modified で行う
 canvas.on('object:scaling', (e) => {
-  if (e.target.data?.type === 'room') syncLabel(e.target);
+  if (e.target.data?.type === 'room') { syncLabel(e.target); syncWetFurniture(e.target); }
 });
 
-// 回転中：ラベル同期のみ（角度スナップは canvas.snapAngle に委譲）
+// 回転中：ラベル同段のみ（角度スナップは canvas.snapAngle に委譲）
 canvas.on('object:rotating', (e) => {
-  if (e.target.data?.type === 'room') syncLabel(e.target);
+  if (e.target.data?.type === 'room') { syncLabel(e.target); syncWetFurniture(e.target); }
 });
 
 // マウスアップ後：スナップ・ラベル同期・履歴保存・パネル更新を一括処理
@@ -486,7 +794,14 @@ canvas.on('object:modified', (e) => {
     canvas.renderAll();
   }
 
-  if (obj.data?.type === 'room') syncLabel(obj);
+  if (obj._wetFurnitureId) {
+    // スケール変更時は家具サイズも再計算（内部で syncLabel も呼ばれる）
+    const action = e.action || '';
+    if (action.startsWith('scale')) recalcWetFurniture(obj);
+    else { syncWetFurniture(obj); syncLabel(obj); }
+  } else if (obj.data?.type === 'room') {
+    syncLabel(obj);
+  }
 
   // 階段：180° / 270° は UP/DN を反転して 0° / 90° に正規化
   // → テキストが逆さまになる角度を排除する
@@ -507,12 +822,16 @@ canvas.on('object:modified', (e) => {
   saveHistory();
 });
 
-// Delete room label when rect is removed
+// Delete room label (and wet furniture) when rect is removed
 canvas.on('object:removed', (e) => {
   const obj = e.target;
   if (obj.data?.type === 'room' && obj._linkedLabelId) {
     const lbl = canvas.getObjects().find(o => o._uid === obj._linkedLabelId);
     if (lbl) canvas.remove(lbl);
+  }
+  if (obj._wetFurnitureId) {
+    const fur = canvas.getObjects().find(o => o._uid === obj._wetFurnitureId);
+    if (fur) canvas.remove(fur);
   }
   updateObjectCount();
 });
@@ -523,7 +842,7 @@ canvas.on('object:removed', (e) => {
 function startWallDraw(pt) {
   draw.startPt = pt;
   draw.preview = new fabric.Line([pt.x, pt.y, pt.x, pt.y], {
-    stroke: '#1a1a1a', strokeWidth: 3,
+    stroke: '#1a1a1a', strokeWidth: WALL_WIDTH,
     selectable: false, evented: false,
     _isPreview: true,
   });
@@ -551,7 +870,7 @@ function finishWallDraw(pt) {
   if (len < GRID_SIZE) return;
 
   const line = new fabric.Line([x1, y1, x2, y2], {
-    stroke: '#1a1a1a', strokeWidth: 3,
+    stroke: '#1a1a1a', strokeWidth: WALL_WIDTH,
     strokeLineCap: 'square',
     strokeUniform: true, lockScalingFlip: true,
     selectable: true, evented: true,
@@ -662,7 +981,7 @@ function closePolygon() {
   clearPolyPreview();
 
   const polyObj = new fabric.Polygon(points, {
-    fill: '#ffffff', stroke: '#1a1a1a', strokeWidth: 2,
+    fill: '#ffffff', stroke: '#1a1a1a', strokeWidth: WALL_WIDTH,
     strokeUniform: true, lockScalingFlip: true,
     objectCaching: false,
     data: { type: 'room', label: '部屋', tatami: '' },
@@ -1034,6 +1353,9 @@ canvas.on('mouse:down', (e) => {
     case 'room':
       if (!e.target) startRoomDraw(pt);
       break;
+    case 'wet-room':
+      if (!e.target) startWetRoomDraw(pt);
+      break;
     case 'wall':
       if (!e.target) startWallDraw(pt);
       break;
@@ -1075,6 +1397,7 @@ canvas.on('mouse:move', (e) => {
   if (isPanning) { doPan(e); return; }
   const pt = getPointer(e);
   if (currentTool === 'room') updateRoomDraw(pt);
+  if (currentTool === 'wet-room') updateWetRoomDraw(pt);
   if (currentTool === 'wall') updateWallDraw(pt);
   if (currentTool === 'poly') updatePolyGuide(pt);
 });
@@ -1083,6 +1406,7 @@ canvas.on('mouse:up', (e) => {
   if (isPanning) { stopPan(); return; }
   const pt = getPointer(e);
   if (currentTool === 'room') finishRoomDraw(pt);
+  if (currentTool === 'wet-room') finishWetRoomDraw(pt);
   if (currentTool === 'wall') finishWallDraw(pt);
 });
 
@@ -1504,7 +1828,7 @@ document.addEventListener('keydown', (e) => {
       const dy = k === 'arrowup'   ? -step : k === 'arrowdown'  ? step : 0;
       objs.forEach(obj => {
         obj.set({ left: obj.left + dx, top: obj.top + dy });
-        if (obj.data?.type === 'room') syncLabel(obj);
+        if (obj.data?.type === 'room') { syncLabel(obj); syncWetFurniture(obj); }
       });
       canvas.requestRenderAll();
       saveHistory();
@@ -1552,6 +1876,8 @@ function duplicateSelected() {
         canvas.add(cloned);
 
         const lblSrc = canvas.getObjects().find(o => o._uid === obj._linkedLabelId);
+        const furSrc = obj._wetFurnitureId
+          ? canvas.getObjects().find(o => o._uid === obj._wetFurnitureId) : null;
         if (lblSrc) {
           lblSrc.clone((lblClone) => {
             lblClone._uid = newId + '_lbl';
@@ -1562,9 +1888,31 @@ function duplicateSelected() {
               top:  cloned.top  + cloned.getScaledHeight() / 2,
             });
             canvas.add(lblClone);
-            clones.push(cloned);
-            done++;
-            if (done === objs.length) finalizeDuplicate(clones);
+
+            if (furSrc) {
+              const furNewId = uid();
+              furSrc.clone((furClone) => {
+                furClone._uid = furNewId;
+                furClone.data = { ...furSrc.data };
+                furClone.set({
+                  left: furSrc.left + GRID_SIZE * 2,
+                  top:  furSrc.top  + GRID_SIZE * 2,
+                  selectable: false,
+                  evented:    false,
+                });
+                canvas.add(furClone);
+                cloned._wetFurnitureId        = furNewId;
+                cloned._wetFurnitureOffset    = { ...obj._wetFurnitureOffset };
+                cloned._wetFurnitureInitAngle = obj._wetFurnitureInitAngle;
+                clones.push(cloned);
+                done++;
+                if (done === objs.length) finalizeDuplicate(clones);
+              }, ['data', '_uid']);
+            } else {
+              clones.push(cloned);
+              done++;
+              if (done === objs.length) finalizeDuplicate(clones);
+            }
           }, ['data', '_uid', '_linkedRectId']);
           return;
         }
@@ -1595,7 +1943,7 @@ function finalizeDuplicate(clones) {
 function saveProject() {
   const name = document.getElementById('filename-input').value || '間取り図';
   const json = JSON.stringify(
-    canvas.toJSON(['data', '_uid', '_linkedLabelId', '_linkedRectId']), null, 2
+    canvas.toJSON(['data', '_uid', '_linkedLabelId', '_linkedRectId', '_wetFurnitureId', '_wetFurnitureOffset', '_wetFurnitureInitAngle', '_wetFurnitureType']), null, 2
   );
   downloadBlob(`${name}.json`, json, 'application/json');
   isDirty = false;
