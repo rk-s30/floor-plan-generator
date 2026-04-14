@@ -23,6 +23,9 @@ const GRID_COLOR      = '#c8c4bc';
 const GRID_COLOR_MAJOR= '#aeaaa0';
 const MIN_ROOM_SIZE   = GRID_SIZE * 2;  // 40px minimum
 const WALL_WIDTH      = 6;             // default stroke width for walls and rooms
+const FURNITURE_TOOLS = new Set(['toilet','bathtub','sink','refrigerator','washer','stove']);
+const ROOM_TOOLS      = new Set(['room','cl-room','poly','wet-room']);
+
 // Fixed room widths for wet rooms (furniture fills this width)
 const WET_ROOM_W = {
   toilet:  3 * GRID_SIZE,   // 60px = ~3グリッド ≒ 1365mm（トイレ室）
@@ -63,6 +66,14 @@ const canvas = new fabric.Canvas('floor-plan-canvas', {
   fireRightClick: true,
 });
 
+// グリッド用 canvas を Fabric の upper canvas の直前に挿入
+// → lower canvas より前面・upper canvas（選択ハンドル）より背面になる
+const gridCanvas = document.createElement('canvas');
+gridCanvas.id = 'grid-canvas';
+gridCanvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;';
+canvas.wrapperEl.insertBefore(gridCanvas, canvas.upperCanvasEl);
+const gridCtx = gridCanvas.getContext('2d');
+
 function fitCanvas() {
   canvas.setWidth(canvasWrap.clientWidth);
   canvas.setHeight(canvasWrap.clientHeight);
@@ -77,19 +88,18 @@ window.addEventListener('resize', () => { fitCanvas(); drawGrid(); });
 function uid() { return `obj_${++uidCounter}_${Date.now()}`; }
 
 // -------------------------------------------------------
-// Grid
+// Grid — drawn on a separate overlay <canvas> so Fabric never touches it
 // -------------------------------------------------------
-let gridLines = [];
-
 function drawGrid() {
-  gridLines.forEach(l => { l._isGrid = true; canvas.remove(l); });
-  gridLines = [];
-  if (!gridVisible) { canvas.renderAll(); return; }
+  const w = canvas.getWidth();
+  const h = canvas.getHeight();
+  gridCanvas.width  = w;
+  gridCanvas.height = h;
+  gridCtx.clearRect(0, 0, w, h);
+  if (!gridVisible) return;
 
   const zoom = canvas.getZoom();
   const vpt  = canvas.viewportTransform;
-  const w    = canvas.getWidth();
-  const h    = canvas.getHeight();
   const left = -vpt[4] / zoom;
   const top  = -vpt[5] / zoom;
   const startX = Math.floor(left / GRID_SIZE) * GRID_SIZE;
@@ -97,31 +107,28 @@ function drawGrid() {
   const endX   = startX + w / zoom + GRID_SIZE;
   const endY   = startY + h / zoom + GRID_SIZE;
 
+  gridCtx.save();
+  gridCtx.setTransform(zoom, 0, 0, zoom, vpt[4], vpt[5]);
+
   for (let x = startX; x <= endX; x += GRID_SIZE) {
     const major = (x / GRID_SIZE) % 5 === 0;
-    const l = new fabric.Line([x, startY, x, endY], {
-      stroke: major ? GRID_COLOR_MAJOR : GRID_COLOR,
-      strokeWidth: major ? 0.8 : 0.5,
-      selectable: false, evented: false,
-      excludeFromExport: true, _isGrid: true,
-    });
-    canvas.add(l);
-    canvas.sendToBack(l);
-    gridLines.push(l);
+    gridCtx.beginPath();
+    gridCtx.strokeStyle = major ? GRID_COLOR_MAJOR : GRID_COLOR;
+    gridCtx.lineWidth   = (major ? 0.8 : 0.5) / zoom;
+    gridCtx.moveTo(x, startY);
+    gridCtx.lineTo(x, endY);
+    gridCtx.stroke();
   }
   for (let y = startY; y <= endY; y += GRID_SIZE) {
     const major = (y / GRID_SIZE) % 5 === 0;
-    const l = new fabric.Line([startX, y, endX, y], {
-      stroke: major ? GRID_COLOR_MAJOR : GRID_COLOR,
-      strokeWidth: major ? 0.8 : 0.5,
-      selectable: false, evented: false,
-      excludeFromExport: true, _isGrid: true,
-    });
-    canvas.add(l);
-    canvas.sendToBack(l);
-    gridLines.push(l);
+    gridCtx.beginPath();
+    gridCtx.strokeStyle = major ? GRID_COLOR_MAJOR : GRID_COLOR;
+    gridCtx.lineWidth   = (major ? 0.8 : 0.5) / zoom;
+    gridCtx.moveTo(startX, y);
+    gridCtx.lineTo(endX, y);
+    gridCtx.stroke();
   }
-  canvas.renderAll();
+  gridCtx.restore();
 }
 
 drawGrid();
@@ -229,6 +236,7 @@ canvas.on('mouse:move', (e) => {
 // -------------------------------------------------------
 const TOOL_LABELS = {
   select: '選択', room: '部屋', poly: '多角形',
+  indent: '削る', protrude: '出す',
   wall: '壁', door: 'ドア', window: '窓', stairs: '階段', text: 'テキスト',
   toilet: 'トイレ', bathtub: 'バスタブ', sink: '流し台',
   refrigerator: '冷蔵庫', washer: '洗濯機', stove: 'コンロ',
@@ -239,12 +247,21 @@ function setTool(name) {
   cancelDrawing();
   cancelWall();
   cancelPolyDraw();
+  cancelModifyDraw();
+  cancelDoorDraw();
 
   currentTool = name;
 
   document.querySelectorAll('.tool-btn[data-tool]').forEach(b => {
     b.classList.toggle('active', b.dataset.tool === name);
   });
+  // パネル系ボタンのアクティブ状態
+  const btnRoomOpen = document.getElementById('tool-room-open');
+  if (btnRoomOpen) btnRoomOpen.classList.toggle('active', ROOM_TOOLS.has(name));
+  const btnFurnitureOpen = document.getElementById('tool-furniture-open');
+  if (btnFurnitureOpen) btnFurnitureOpen.classList.toggle('active', FURNITURE_TOOLS.has(name));
+  const btnDoorOpen = document.getElementById('tool-door-open');
+  if (btnDoorOpen) btnDoorOpen.classList.toggle('active', name === 'door');
 
   const isSelect = name === 'select';
   canvas.isDrawingMode = false;
@@ -270,9 +287,12 @@ function setTool(name) {
   const TOOL_HINTS = {
     select:     '',
     room:       'ドラッグで部屋を描く',
+    'cl-room':  'ドラッグでCL（クローゼット）を描く',
     poly:       'クリックで頂点を追加 / 最初の点をクリックまたは Enter で確定 / Esc でキャンセル',
     wall:       'クリックで壁の始点・終点を指定 / Esc でキャンセル',
-    door:       'クリックで配置 / [ ] で回転',
+    door:       '壁上の1点目をクリック → 2点目をクリック → マウスで向きを確認して3クリック目で配置 / Esc でキャンセル',
+    indent:     '壁をクリック(起点) → 自由点を任意個クリック → 壁をクリック(終点)で確定 / Esc でキャンセル',
+    protrude:   '壁をクリック(起点) → 自由点を任意個クリック → 壁をクリック(終点)で確定 / Esc でキャンセル',
     window:     '壁の上をドラッグして窓を挿入',
     stairs:     'クリックで配置 / [ ] で回転',
     text:       'クリックでテキストを配置 / ダブルクリックで編集',
@@ -291,35 +311,98 @@ function setTool(name) {
   $hintSep.style.display  = hint ? '' : 'none';
 }
 
+
 document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
   btn.addEventListener('click', () => setTool(btn.dataset.tool));
 });
 
-// Wet room flyout
-(function () {
-  const flyout = document.getElementById('wet-flyout');
-  const btnWet = document.getElementById('tool-wet-room');
+// パネル共通：固定位置で表示、他パネルをすべて閉じる
+const ALL_PANELS = ['room-panel', 'furniture-panel', 'door-panel'];
+function _openPanel(panel, triggerBtn) {
+  ALL_PANELS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el !== panel) el.style.display = 'none';
+  });
+  if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
+  const r = triggerBtn.getBoundingClientRect();
+  panel.style.left = (r.right + 6) + 'px';
+  panel.style.top  = r.top + 'px';
+  panel.style.display = 'block';
+}
 
-  btnWet.addEventListener('click', (e) => {
+// 部屋パネルの開閉
+(function () {
+  const panel  = document.getElementById('room-panel');
+  const btnOpen = document.getElementById('tool-room-open');
+
+  btnOpen.addEventListener('click', (e) => {
     e.stopPropagation();
-    const r = btnWet.getBoundingClientRect();
-    flyout.style.left    = (r.right + 6) + 'px';
-    flyout.style.top     = r.top + 'px';
-    flyout.style.display = flyout.style.display === 'none' ? 'flex' : 'none';
+    _openPanel(panel, btnOpen);
   });
 
-  flyout.querySelectorAll('.wet-flyout-item').forEach(item => {
+  // 普通の部屋・多角形
+  panel.querySelectorAll('[data-tool]').forEach(item => {
     item.addEventListener('click', (e) => {
       e.stopPropagation();
-      wetRoomType = item.dataset.wet;
-      flyout.style.display = 'none';
-      setTool('wet-room');
-      // Reflect active state on button
-      btnWet.classList.add('active');
+      panel.style.display = 'none';
+      setTool(item.dataset.tool);
     });
   });
 
-  document.addEventListener('click', () => { flyout.style.display = 'none'; });
+  // 水回り部屋
+  panel.querySelectorAll('[data-wet]').forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      wetRoomType = item.dataset.wet;
+      panel.style.display = 'none';
+      setTool('wet-room');
+    });
+  });
+
+  document.addEventListener('click', () => { panel.style.display = 'none'; });
+})();
+
+// 家具パネルの開閉
+(function () {
+  const panel  = document.getElementById('furniture-panel');
+  const btnOpen = document.getElementById('tool-furniture-open');
+
+  btnOpen.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _openPanel(panel, btnOpen);
+  });
+
+  panel.querySelectorAll('.furniture-item[data-tool]').forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      panel.style.display = 'none';
+      setTool(item.dataset.tool);
+    });
+  });
+
+  document.addEventListener('click', () => { panel.style.display = 'none'; });
+})();
+
+// ドアパネルの開閉
+(function () {
+  const panel   = document.getElementById('door-panel');
+  const btnOpen = document.getElementById('tool-door-open');
+
+  btnOpen.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _openPanel(panel, btnOpen);
+  });
+
+  panel.querySelectorAll('.furniture-item[data-tool]').forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      panel.style.display = 'none';
+      if (item.dataset.doorSubtype) doorSubtype = item.dataset.doorSubtype;
+      setTool(item.dataset.tool);
+    });
+  });
+
+  document.addEventListener('click', () => { panel.style.display = 'none'; });
 })();
 
 // -------------------------------------------------------
@@ -356,10 +439,10 @@ function showDrawDimTooltip(pt, wPx, hPx) {
   const wM = (wPx / GRID_SIZE * GRID_MM / 1000);
   const hM = (hPx / GRID_SIZE * GRID_MM / 1000);
   const sqm = wM * hM;
-  const wStr   = wM.toFixed(2).replace(/\.?0+$/, '');
-  const hStr   = hM.toFixed(2).replace(/\.?0+$/, '');
-  const sqmStr = sqm.toFixed(1);
-  tip.textContent = `${wStr}m × ${hStr}m ≈ ${sqmStr}㎡`;
+  const tatami = sqm / TATAMI_SQM;
+  const sqmStr    = sqm.toFixed(1);
+  const tatamiStr = tatami.toFixed(1);
+  tip.textContent = `${tatamiStr}畳 ≈ ${sqmStr}㎡`;
 
   // キャンバス要素の画面座標を基準に絶対配置
   const canvasEl = document.getElementById('floor-plan-canvas');
@@ -396,7 +479,8 @@ function finishRoomDraw(pt) {
 
   if (w < MIN_ROOM_SIZE || h < MIN_ROOM_SIZE) return;
 
-  addRoom(x, y, w, h);
+  const label = currentTool === 'cl-room' ? 'CL' : '部屋';
+  addRoom(x, y, w, h, label);
   saveHistory();
 }
 
@@ -531,6 +615,7 @@ function addWetRoom(x, y, w, h, type) {
     rect._wetFurnitureId   = furniture._uid;
     rect._wetFurnitureType = type;
     recalcWetFurniture(rect);  // syncLabel も内部で呼ばれる
+    canvas.setActiveObject(rect);
     canvas.renderAll();
   }
 }
@@ -741,6 +826,7 @@ function syncLabel(rectObj) {
     canvas.bringToFront(lbl);
   } else {
     lbl.set({ left: center.x, top: center.y, fontSize: fs });
+    canvas.bringToFront(lbl);
   }
   canvas.renderAll();
 }
@@ -813,11 +899,13 @@ canvas.on('object:modified', (e) => {
   if (!obj || obj._isGrid) return;
 
   if (snapEnabled && !obj.data?.snapDisabled) {
-    // 位置スナップ
-    obj.set({
-      left: snap(obj.left),
-      top:  snap(obj.top),
-    });
+    // 位置スナップ（窓は壁上に固定されるのでスキップ）
+    if (obj.data?.type !== 'window') {
+      obj.set({
+        left: snap(obj.left),
+        top:  snap(obj.top),
+      });
+    }
 
     // サイズスナップ（Line・テキスト・窓以外）
     if (obj.type !== 'line' && obj.type !== 'i-text' && obj.type !== 'text'
@@ -830,13 +918,10 @@ canvas.on('object:modified', (e) => {
       });
     }
 
-    // 窓：長さ方向のみスナップ、厚さは常に壁と同じに固定
+    // 窓：長さ方向のみスナップ、位置・厚さはスナップしない
     if (obj.data?.type === 'window') {
       const snappedW = Math.max(snap(obj.getScaledWidth()), GRID_SIZE);
-      obj.set({
-        scaleX: snappedW / obj.width,
-        scaleY: WALL_WIDTH / obj.height,
-      });
+      obj.set({ scaleX: snappedW / obj.width });
     }
 
     canvas.renderAll();
@@ -1222,28 +1307,565 @@ function addStove(x, y) {
 }
 
 // -------------------------------------------------------
-// Door — click to place (quarter-circle swing symbol)
+// Door — 3-click flow: pt1 → pt2 → orientation confirm
 // -------------------------------------------------------
-function addDoor(x, y) {
-  const s = GRID_SIZE * 4; // 80px
+let doorSubtype = 'swing'; // 'swing' | 'bifold' | 'double-bifold'
 
-  // Pie-slice path: hinge at (0,0), panel → (0,s), arc → (s,0), close
-  // sweep-flag=0 (CCW in SVG) → 90° arc sweeping through bottom-right quadrant
-  const door = new fabric.Path(
-    `M 0 0 L 0 ${s} A ${s} ${s} 0 0 0 ${s} 0 Z`,
-    {
-      left:          x,
-      top:           y,
-      fill:          'rgba(186, 230, 253, 0.35)',
-      stroke:        '#1a1a1a',
-      strokeWidth:   2,
-      strokeUniform: true, lockScalingFlip: true,
-      data: { type: 'door', size: s },
-      _uid: uid(),
+const doorTool = { state: 0, pt1: null, pt2: null, linePreview: null, shapePreview: null };
+
+// pt1, pt2: door opening endpoints; mousePt: determines hinge side & swing direction
+function _getDoorPath(pt1, pt2, mousePt) {
+  const dx = pt2.x - pt1.x, dy = pt2.y - pt1.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 4) return null;
+  const d    = { x: dx / len, y: dy / len };        // wall direction
+  const perp = { x: -d.y, y: d.x };                 // perpendicular (CCW)
+  const mid  = { x: (pt1.x + pt2.x) / 2, y: (pt1.y + pt2.y) / 2 };
+
+  // Which end is the hinge?
+  const t = (mousePt.x - pt1.x) * d.x + (mousePt.y - pt1.y) * d.y;
+  const hinge    = t < len / 2 ? pt1 : pt2;
+  const dFromH   = t < len / 2 ? d : { x: -d.x, y: -d.y };
+
+  // Which side does the door swing?
+  const s = (mousePt.x - mid.x) * perp.x + (mousePt.y - mid.y) * perp.y;
+  const n = s >= 0 ? perp : { x: -perp.x, y: -perp.y };
+
+  // SVG arc sweep flag (CW=1, CCW=0 in screen coords)
+  const sweepFlag = (dFromH.x * n.y - dFromH.y * n.x) > 0 ? 1 : 0;
+
+  const ex = hinge.x + dFromH.x * len;
+  const ey = hinge.y + dFromH.y * len;
+  const ox = hinge.x + n.x * len;
+  const oy = hinge.y + n.y * len;
+
+  // 壁側の線（閉じ位置）は省略 → アーク＋ヒンジへの線のみ
+  return {
+    pathStr: `M ${ex} ${ey} A ${len} ${len} 0 0 ${sweepFlag} ${ox} ${oy} L ${hinge.x} ${hinge.y}`,
+    len,
+  };
+}
+
+// 折り戸（2枚）: V字形の2本線
+function _getBifoldPath(pt1, pt2, mousePt) {
+  const dx = pt2.x - pt1.x, dy = pt2.y - pt1.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 4) return null;
+  const d    = { x: dx / len, y: dy / len };
+  const perp = { x: -d.y, y: d.x };
+  const mid  = { x: (pt1.x + pt2.x) / 2, y: (pt1.y + pt2.y) / 2 };
+  const s    = (mousePt.x - mid.x) * perp.x + (mousePt.y - mid.y) * perp.y;
+  const n    = s >= 0 ? 1 : -1;
+  const depth = len * 0.3;
+  const fold = { x: mid.x + n * perp.x * depth, y: mid.y + n * perp.y * depth };
+  return {
+    pathStr: `M ${pt1.x} ${pt1.y} L ${fold.x} ${fold.y} L ${pt2.x} ${pt2.y}`,
+    len,
+  };
+}
+
+// 2枚折り戸（4枚）: W字形の4本線
+function _getDoubleBifoldPath(pt1, pt2, mousePt) {
+  const dx = pt2.x - pt1.x, dy = pt2.y - pt1.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 4) return null;
+  const d    = { x: dx / len, y: dy / len };
+  const perp = { x: -d.y, y: d.x };
+  const mid  = { x: (pt1.x + pt2.x) / 2, y: (pt1.y + pt2.y) / 2 };
+  const s    = (mousePt.x - mid.x) * perp.x + (mousePt.y - mid.y) * perp.y;
+  const n    = s >= 0 ? 1 : -1;
+  const depth = len * 0.15;
+  const q1  = { x: pt1.x + dx * 0.25, y: pt1.y + dy * 0.25 };
+  const q3  = { x: pt1.x + dx * 0.75, y: pt1.y + dy * 0.75 };
+  const f1  = { x: q1.x + n * perp.x * depth, y: q1.y + n * perp.y * depth };
+  const f2  = { x: q3.x + n * perp.x * depth, y: q3.y + n * perp.y * depth };
+  return {
+    pathStr: `M ${pt1.x} ${pt1.y} L ${f1.x} ${f1.y} L ${mid.x} ${mid.y} L ${f2.x} ${f2.y} L ${pt2.x} ${pt2.y}`,
+    len,
+  };
+}
+
+function _getDoorPathForSubtype(pt1, pt2, mousePt) {
+  if (doorSubtype === 'bifold')        return _getBifoldPath(pt1, pt2, mousePt);
+  if (doorSubtype === 'double-bifold') return _getDoubleBifoldPath(pt1, pt2, mousePt);
+  return _getDoorPath(pt1, pt2, mousePt);
+}
+
+function _doorClearPreviews() {
+  if (doorTool.linePreview)  { canvas.remove(doorTool.linePreview);  doorTool.linePreview  = null; }
+  if (doorTool.shapePreview) { canvas.remove(doorTool.shapePreview); doorTool.shapePreview = null; }
+}
+
+function cancelDoorDraw() {
+  _doorClearPreviews();
+  doorTool.state = 0; doorTool.pt1 = null; doorTool.pt2 = null;
+  canvas.renderAll();
+}
+
+function handleDoorDown(rawPt) {
+  if (doorTool.state === 0) {
+    const hit = findNearestWallOrEdge(rawPt);
+    if (!hit) return;
+    const t = projectOntoSegment(rawPt, hit.p1, hit.p2);
+    const pt = ptOnSegment(hit.p1, hit.p2, t);
+    doorTool.pt1 = pt;
+    doorTool.state = 1;
+
+  } else if (doorTool.state === 1) {
+    const hit = findNearestWallOrEdge(rawPt);
+    if (!hit) return;
+    const t = projectOntoSegment(rawPt, hit.p1, hit.p2);
+    const pt = ptOnSegment(hit.p1, hit.p2, t);
+    doorTool.pt2 = pt;
+    doorTool.state = 2;
+    _doorUpdateShapePreview(rawPt);
+
+  } else if (doorTool.state === 2) {
+    // Confirm placement
+    const result = _getDoorPathForSubtype(doorTool.pt1, doorTool.pt2, rawPt);
+    const pt1 = doorTool.pt1, pt2 = doorTool.pt2;
+    _doorClearPreviews();
+    doorTool.state = 0; doorTool.pt1 = null; doorTool.pt2 = null;
+    if (result) {
+      _placeDoorGrouped(result.pathStr, result.len, pt1, pt2);
     }
-  );
+    setTool('select');
+  }
+}
+
+function handleDoorMove(rawPt) {
+  if (doorTool.state === 1) {
+    // Line preview from pt1 to cursor (snapped to nearest wall)
+    if (doorTool.linePreview) canvas.remove(doorTool.linePreview);
+    const hit = findNearestWallOrEdge(rawPt);
+    const pt = hit
+      ? ptOnSegment(hit.p1, hit.p2, projectOntoSegment(rawPt, hit.p1, hit.p2))
+      : { x: snap(rawPt.x), y: snap(rawPt.y) };
+    doorTool.linePreview = new fabric.Line(
+      [doorTool.pt1.x, doorTool.pt1.y, pt.x, pt.y],
+      { stroke: '#d97706', strokeWidth: 2, strokeDashArray: [6, 3],
+        selectable: false, evented: false, _isPreview: true }
+    );
+    canvas.add(doorTool.linePreview);
+    canvas.renderAll();
+
+  } else if (doorTool.state === 2) {
+    _doorUpdateShapePreview(rawPt);
+  }
+}
+
+function _doorUpdateShapePreview(rawPt) {
+  if (doorTool.shapePreview) { canvas.remove(doorTool.shapePreview); doorTool.shapePreview = null; }
+  const result = _getDoorPathForSubtype(doorTool.pt1, doorTool.pt2, rawPt);
+  if (!result) return;
+  const isFold = doorSubtype !== 'swing';
+  doorTool.shapePreview = new fabric.Path(result.pathStr, {
+    fill: isFold ? 'transparent' : 'rgba(217, 119, 6, 0.2)',
+    stroke: '#d97706', strokeWidth: 2, strokeDashArray: [6, 3],
+    selectable: false, evented: false, _isPreview: true,
+  });
+  canvas.add(doorTool.shapePreview);
+  canvas.renderAll();
+}
+
+// Interactive door placement — gap line + door path grouped together
+function _placeDoorGrouped(pathStr, size, pt1, pt2) {
+  const gapLen   = Math.hypot(pt2.x - pt1.x, pt2.y - pt1.y);
+  const gapAngle = Math.atan2(pt2.y - pt1.y, pt2.x - pt1.x) * 180 / Math.PI;
+  const gapMid   = { x: (pt1.x + pt2.x) / 2, y: (pt1.y + pt2.y) / 2 };
+  const gapRect = new fabric.Rect({
+    left: gapMid.x, top: gapMid.y,
+    width: gapLen, height: WALL_WIDTH,
+    fill: '#ffffff', stroke: '#1a1a1a', strokeWidth: 1,
+    originX: 'center', originY: 'center',
+    angle: gapAngle,
+  });
+  const doorPath = new fabric.Path(pathStr, {
+    fill: 'transparent',
+    stroke: '#1a1a1a',
+    strokeWidth: 2,
+    strokeUniform: true,
+  });
+  const group = new fabric.Group([doorPath, gapRect], {
+    lockScalingFlip: true,
+    data: { type: 'door', size },
+    _uid: uid(),
+  });
+  canvas.add(group);
+  canvas.setActiveObject(group);
+  updateObjectCount();
+  canvas.renderAll();
+  saveHistory();
+}
+
+// Programmatic door placement (used by JSON import / legacy flow)
+function addDoor(x, y) {
+  const s = GRID_SIZE * 4;
+  addDoorFromPath(`M 0 ${s} A ${s} ${s} 0 0 0 ${s} 0 L 0 0`, s, x, y);
+}
+
+function addDoorFromPath(pathStr, size, left, top) {
+  const opts = {
+    fill: 'transparent', stroke: '#1a1a1a',
+    strokeWidth: 2, strokeUniform: true, lockScalingFlip: true,
+    data: { type: 'door', size }, _uid: uid(),
+  };
+  if (left !== undefined) { opts.left = left; opts.top = top; }
+  const door = new fabric.Path(pathStr, opts);
   canvas.add(door);
   canvas.setActiveObject(door);
+  updateObjectCount();
+  canvas.renderAll();
+  saveHistory();
+}
+
+// -------------------------------------------------------
+// Room modify — indent (削る) / protrude (出っ張らせる)
+// UX: ①辺上で1点目クリック ②辺上で2点目クリック ③ドラッグで深さ決定・離して確定
+// -------------------------------------------------------
+
+// 部屋（Rect or Polygon）の頂点をキャンバス座標で返す
+function getRoomCanvasPoints(room) {
+  if (room.type === 'rect') {
+    // getCoords() includes strokeWidth in the bounding box (Fabric.js 5 behaviour),
+    // so we compute geometric corners manually to avoid a strokeWidth/2 offset.
+    const center = room.getCenterPoint();
+    // getScaledWidth() includes strokeWidth → use room.width * scaleX for pure geometry
+    const w = room.width  * (room.scaleX || 1) / 2;
+    const h = room.height * (room.scaleY || 1) / 2;
+    const rad = fabric.util.degreesToRadians(room.angle || 0);
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    return [
+      { x: center.x - cos*w + sin*h, y: center.y - sin*w - cos*h }, // TL
+      { x: center.x + cos*w + sin*h, y: center.y + sin*w - cos*h }, // TR
+      { x: center.x + cos*w - sin*h, y: center.y + sin*w + cos*h }, // BR
+      { x: center.x - cos*w - sin*h, y: center.y - sin*w + cos*h }, // BL
+    ];
+  }
+  // polygon: points は pathOffset 基準のローカル座標
+  const matrix = room.calcTransformMatrix();
+  const ox = room.pathOffset ? room.pathOffset.x : 0;
+  const oy = room.pathOffset ? room.pathOffset.y : 0;
+  return room.points.map(p => {
+    const pt = fabric.util.transformPoint({ x: p.x - ox, y: p.y - oy }, matrix);
+    return { x: pt.x, y: pt.y };
+  });
+}
+
+// pt に最も近い部屋の辺を返す
+function findNearestRoomEdgePt(pt, threshold) {
+  threshold = threshold || 25;
+  let best = null, bestDist = threshold;
+  canvas.getObjects().forEach(function(obj) {
+    if (obj._isGrid || obj._isPreview) return;
+    if (obj.data && obj.data.type !== 'room') return;
+    if (obj.type !== 'rect' && obj.type !== 'polygon') return;
+    const verts = getRoomCanvasPoints(obj);
+    const n = verts.length;
+    for (let i = 0; i < n; i++) {
+      const v1 = verts[i], v2 = verts[(i + 1) % n];
+      const t = projectOntoSegment(pt, v1, v2);
+      const snap = ptOnSegment(v1, v2, t);
+      const d = Math.hypot(pt.x - snap.x, pt.y - snap.y);
+      if (d < bestDist) {
+        bestDist = d;
+        best = { room: obj, edgeIdx: i, snapPt: snap, v1: v1, v2: v2, t: t };
+      }
+    }
+  });
+  return best;
+}
+
+// 辺の内向き法線（部屋中心方向）を返す
+function edgeInwardNormal(v1, v2, roomCenter) {
+  const dx = v2.x - v1.x, dy = v2.y - v1.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 0.001) return { x: 0, y: -1 };
+  const lx = -dy / len, ly = dx / len;   // 左垂直
+  const rx =  dy / len, ry = -dx / len;  // 右垂直
+  const mid = { x: (v1.x + v2.x) / 2, y: (v1.y + v2.y) / 2 };
+  const toCx = roomCenter.x - mid.x, toCy = roomCenter.y - mid.y;
+  return (lx * toCx + ly * toCy) > 0 ? { x: lx, y: ly } : { x: rx, y: ry };
+}
+
+// -------------------------------------------------------
+// Room modify — 削る / 出す
+// UX: ①壁クリック(pt1) → ②自由クリック×任意 → ③壁クリック(ptN) で確定
+// -------------------------------------------------------
+const modTool = {
+  state:    0,      // 0=idle 1=点収集中
+  type:     null,   // 'indent'|'protrude'
+  room:     null,
+  edge1:    -1,     // pt1 が乗る辺インデックス
+  pt1:      null,
+  freePts:  [],     // 自由点リスト
+  // preview
+  dots:     [],
+  lines:    [],
+  cursorLine: null,
+};
+
+function _modClearPreview() {
+  modTool.dots.forEach(d => canvas.remove(d));  modTool.dots = [];
+  modTool.lines.forEach(l => canvas.remove(l)); modTool.lines = [];
+  if (modTool.cursorLine) { canvas.remove(modTool.cursorLine); modTool.cursorLine = null; }
+}
+
+function cancelModifyDraw() {
+  _modClearPreview();
+  modTool.state = 0;
+  modTool.room = modTool.pt1 = null;
+  modTool.edge1 = -1;
+  modTool.freePts = [];
+  canvas.renderAll();
+}
+
+// 点がポリゴン内にあるか（ray casting）
+function _pointInPolygon(pt, polyPts) {
+  let inside = false;
+  const n = polyPts.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = polyPts[i].x, yi = polyPts[i].y;
+    const xj = polyPts[j].x, yj = polyPts[j].y;
+    if ((yi > pt.y) !== (yj > pt.y) &&
+        pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// 指定部屋の最近傍辺を返す（閾値内のみ）
+function _findEdgeOnRoom(rawPt, room) {
+  const threshold = 16 / canvas.getZoom();
+  const verts = getRoomCanvasPoints(room);
+  const n = verts.length;
+  let best = null, bestDist = threshold;
+  for (let i = 0; i < n; i++) {
+    const v1 = verts[i], v2 = verts[(i+1)%n];
+    const t  = projectOntoSegment(rawPt, v1, v2);
+    const c  = ptOnSegment(v1, v2, t);
+    const d  = Math.hypot(rawPt.x - c.x, rawPt.y - c.y);
+    if (d < bestDist) { bestDist = d; best = { edgeIdx: i }; }
+  }
+  return best;
+}
+
+// どの部屋の辺にも近い点を返す
+function _findEdgeOnAnyRoom(rawPt) {
+  const threshold = 16 / canvas.getZoom();
+  let best = null, bestDist = threshold;
+  canvas.getObjects().forEach(obj => {
+    if (obj._isGrid || obj._isPreview) return;
+    if (obj.data?.type !== 'room') return;
+    if (obj.type !== 'rect' && obj.type !== 'polygon') return;
+    const verts = getRoomCanvasPoints(obj);
+    const n = verts.length;
+    for (let i = 0; i < n; i++) {
+      const v1 = verts[i], v2 = verts[(i+1)%n];
+      const t  = projectOntoSegment(rawPt, v1, v2);
+      const c  = ptOnSegment(v1, v2, t);
+      const d  = Math.hypot(rawPt.x - c.x, rawPt.y - c.y);
+      if (d < bestDist) { bestDist = d; best = { room: obj, edgeIdx: i }; }
+    }
+  });
+  return best;
+}
+
+function _modAddDot(pt) {
+  const dot = new fabric.Circle({
+    left: pt.x, top: pt.y, radius: 5,
+    originX: 'center', originY: 'center',
+    fill: '#d97706', stroke: '#ffffff', strokeWidth: 1.5,
+    selectable: false, evented: false, _isPreview: true,
+  });
+  canvas.add(dot);
+  modTool.dots.push(dot);
+}
+
+function _modAddLine(a, b, dashed) {
+  const line = new fabric.Line([a.x, a.y, b.x, b.y], {
+    stroke: '#d97706', strokeWidth: 2,
+    strokeDashArray: dashed ? [6, 3] : null,
+    selectable: false, evented: false, _isPreview: true,
+  });
+  canvas.add(line);
+  modTool.lines.push(line);
+}
+
+// 辺上に投影した点を返す（壁クリックは必ず辺上になるよう）
+function _projectOntoEdge(rawPt, room, edgeIdx) {
+  const verts = getRoomCanvasPoints(room);
+  const va = verts[edgeIdx];
+  const vb = verts[(edgeIdx + 1) % verts.length];
+  const t  = Math.max(0, Math.min(1, projectOntoSegment(rawPt, va, vb)));
+  return ptOnSegment(va, vb, t);
+}
+
+// マウスダウン処理
+function handleModifyDown(rawPt, type) {
+  if (modTool.state === 0) {
+    const hit = _findEdgeOnAnyRoom(rawPt);
+    if (!hit) return;
+    // 壁クリック: 辺上に投影してからグリッドスナップ
+    const _proj1 = _projectOntoEdge(rawPt, hit.room, hit.edgeIdx);
+    const pt1 = { x: snap(_proj1.x), y: snap(_proj1.y) };
+    modTool.type  = type;
+    modTool.room  = hit.room;
+    modTool.edge1 = hit.edgeIdx;
+    modTool.pt1   = pt1;
+    modTool.freePts = [];
+    modTool.state = 1;
+    _modAddDot(pt1);
+    canvas.renderAll();
+
+  } else if (modTool.state === 1) {
+    const hit = _findEdgeOnRoom(rawPt, modTool.room);
+
+    if (hit && modTool.freePts.length >= 1) {
+      // 終点壁クリック → 辺上に投影してグリッドスナップ後に確定
+      const _projN = _projectOntoEdge(rawPt, modTool.room, hit.edgeIdx);
+      const ptN = { x: snap(_projN.x), y: snap(_projN.y) };
+      const edgeN = hit.edgeIdx;
+      const { room, pt1, edge1, freePts, type } = modTool;
+      _modClearPreview();
+      modTool.state = 0;
+      modTool.room = modTool.pt1 = null;
+      modTool.edge1 = -1;
+      modTool.freePts = [];
+      _applyRoomModification(room, pt1, edge1, freePts, ptN, edgeN);
+      setTool('select');
+    } else {
+      // 自由点追加 — 削る=内側・出す=外側 のみ受け付ける
+      // 方向チェックはスナップ前の生座標で行う（スナップで壁上に乗ると境界判定がずれるため）
+      const pt = { x: snap(rawPt.x), y: snap(rawPt.y) };
+      const verts = getRoomCanvasPoints(modTool.room);
+      const isInside = _pointInPolygon(rawPt, verts);
+      if (modTool.type === 'indent'   && !isInside) return;  // 削る: 外側は無効
+      if (modTool.type === 'protrude' &&  isInside) return;  // 出す: 内側は無効
+
+      const prevPt = modTool.freePts.length === 0 ? modTool.pt1 : modTool.freePts[modTool.freePts.length - 1];
+      modTool.freePts.push(pt);
+      _modAddDot(pt);
+      _modAddLine(prevPt, pt, false);
+      canvas.renderAll();
+    }
+  }
+}
+
+// マウスムーブ処理
+function handleModifyMove(rawPt) {
+  if (modTool.state !== 1) return;
+  if (modTool.cursorLine) { canvas.remove(modTool.cursorLine); modTool.cursorLine = null; }
+  const lastPt = modTool.freePts.length === 0 ? modTool.pt1 : modTool.freePts[modTool.freePts.length - 1];
+  const pt = { x: snap(rawPt.x), y: snap(rawPt.y) };
+  modTool.cursorLine = new fabric.Line([lastPt.x, lastPt.y, pt.x, pt.y], {
+    stroke: '#d97706', strokeWidth: 2, strokeDashArray: [6, 3],
+    selectable: false, evented: false, _isPreview: true,
+  });
+  canvas.add(modTool.cursorLine);
+  canvas.renderAll();
+}
+
+function handleModifyUp(rawPt) { /* 確定は mouse:down で行う */ }
+
+// 実際に部屋ポリゴンを変形する
+// pt1(edge1上) → freePts → ptN(edgeN上) で wall section を置換
+function _applyRoomModification(room, pt1, edge1, freePts, ptN, edgeN) {
+  const verts = getRoomCanvasPoints(room);
+  const n = verts.length;
+
+  // pt1/ptN はグリッドスナップ済みで壁から微妙にずれている可能性があるため、
+  // ポリゴン構築前に辺上へ再投影して直線を保証する
+  let p1 = _projectOntoEdge(pt1, room, edge1);
+  let pN = _projectOntoEdge(ptN, room, edgeN);
+  let fps = [...freePts];
+  let e1 = edge1, eN = edgeN;
+
+  if (e1 === eN) {
+    // 同じ辺: t1 < tN になるよう並べ替え
+    const t1 = projectOntoSegment(p1, verts[e1], verts[(e1+1)%n]);
+    const tN = projectOntoSegment(pN, verts[eN], verts[(eN+1)%n]);
+    if (t1 > tN) { [p1, pN] = [pN, p1]; fps = fps.reverse(); }
+  } else {
+    // 異なる辺: 置換区間が短くなる経路を選択
+    // 前進方向で置換される頂点数 = (eN - e1 + n) % n
+    const fwdSkip = (eN - e1 + n) % n;
+    if (fwdSkip > n - fwdSkip) {
+      // 後退方向のほうが短い → e1/eN と p1/pN を入れ替えて前進方向を逆にする
+      [e1, eN] = [eN, e1];
+      [p1, pN] = [pN, p1];
+      fps = fps.reverse();
+    }
+  }
+
+  // 新頂点列を構築
+  // v[(eN+1)%n] から v[e1] まで既存頂点を保持し、その後 p1→fps→pN を追加
+  const count = ((e1 - eN + n) % n) || n;
+  const newVerts = [];
+  for (let j = 0; j < count; j++) {
+    newVerts.push(verts[(eN + 1 + j) % n]);
+  }
+
+  // 重複回避: p1 が v[e1] と同一なら省略
+  const t1 = projectOntoSegment(p1, verts[e1], verts[(e1+1)%n]);
+  if (t1 > 0.005) newVerts.push(p1);
+  fps.forEach(p => newVerts.push(p));
+  // 重複回避: pN が v[(eN+1)%n] と同一なら省略
+  const tN = projectOntoSegment(pN, verts[eN], verts[(eN+1)%n]);
+  if (tN < 0.995) newVerts.push(pN);
+
+  // 新しいポリゴンを作成（プロパティを引き継ぐ）
+  const newRoom = new fabric.Polygon(newVerts, {
+    fill:            room.fill  || '#ffffff',
+    stroke:          room.stroke || '#1a1a1a',
+    strokeWidth:     room.strokeWidth || WALL_WIDTH,
+    strokeUniform:   true,
+    lockScalingFlip: true,
+    objectCaching:   false,
+    strokeLineJoin:  'miter',
+    data:            Object.assign({}, room.data),
+    _uid:            room._uid,
+    _linkedLabelId:  room._linkedLabelId,
+  });
+  if (room._wetFurnitureId) {
+    newRoom._wetFurnitureId        = room._wetFurnitureId;
+    newRoom._wetFurnitureOffset    = room._wetFurnitureOffset;
+    newRoom._wetFurnitureInitAngle = room._wetFurnitureInitAngle;
+    newRoom._wetFurnitureType      = room._wetFurnitureType;
+  }
+
+  historyPaused = true;
+  // object:removed でラベル・水回り家具が連動削除されないよう一時的にリンクを外す
+  const savedLabelId      = room._linkedLabelId;
+  const savedFurnitureId  = room._wetFurnitureId;
+  room._linkedLabelId = null;
+  room._wetFurnitureId = null;
+  const roomIndex = canvas.getObjects().indexOf(room);
+  canvas.remove(room);
+  canvas.add(newRoom);
+  if (roomIndex >= 0) canvas.moveTo(newRoom, roomIndex);
+  newRoom._linkedLabelId = savedLabelId;
+  historyPaused = false;
+
+  if (savedFurnitureId) {
+    // 家具の現在の絶対座標から新しい部屋中心との相対オフセットを再計算し、
+    // 家具を動かさずにオフセットだけ更新する
+    const fur = canvas.getObjects().find(o => o._uid === savedFurnitureId);
+    if (fur) {
+      const center = newRoom.getCenterPoint();
+      const rad = fabric.util.degreesToRadians(newRoom.angle || 0);
+      const cos = Math.cos(rad), sin = Math.sin(rad);
+      const relX = fur.left - center.x;
+      const relY = fur.top  - center.y;
+      newRoom._wetFurnitureOffset = {
+        dx:  cos * relX + sin * relY,
+        dy: -sin * relX + cos * relY,
+      };
+    }
+  }
+  syncLabel(newRoom);
+  canvas.setActiveObject(newRoom);
   updateObjectCount();
   canvas.renderAll();
   saveHistory();
@@ -1281,7 +1903,8 @@ function ptOnSegment(p1, p2, t) {
 // 壁（Line）または部屋の辺（Rect）のうち最も近いものを返す
 // 戻り値: { isWall, obj, p1, p2 } または null
 function findNearestWallOrEdge(pt) {
-  let best = null, bestDist = 30;
+  // 30 screen-px regardless of zoom level
+  let best = null, bestDist = 30 / canvas.getZoom();
 
   canvas.getObjects().forEach(obj => {
     if (obj._isGrid || obj._isPreview) return;
@@ -1293,21 +1916,16 @@ function findNearestWallOrEdge(pt) {
       const d = Math.hypot(pt.x - c.x, pt.y - c.y);
       if (d < bestDist) { bestDist = d; best = { isWall: true, obj, p1, p2 }; }
 
-    } else if (obj.data?.type === 'room' && obj.type === 'rect') {
-      const corners = obj.getCoords();   // [TL, TR, BR, BL] in canvas coords
-      const edges = [
-        [corners[0], corners[1]],  // top
-        [corners[1], corners[2]],  // right
-        [corners[2], corners[3]],  // bottom
-        [corners[3], corners[0]],  // left
-      ];
-      edges.forEach(([a, b]) => {
-        const p1 = { x: a.x, y: a.y }, p2 = { x: b.x, y: b.y };
+    } else if (obj.data?.type === 'room') {
+      const verts = getRoomCanvasPoints(obj);
+      const n = verts.length;
+      for (let i = 0; i < n; i++) {
+        const p1 = verts[i], p2 = verts[(i + 1) % n];
         const t  = projectOntoSegment(pt, p1, p2);
         const c  = ptOnSegment(p1, p2, t);
         const d  = Math.hypot(pt.x - c.x, pt.y - c.y);
         if (d < bestDist) { bestDist = d; best = { isWall: false, obj, p1, p2 }; }
-      });
+      }
     }
   });
   return best;
@@ -1322,42 +1940,46 @@ function makeWallLine(p1, p2) {
   });
 }
 
-// 引き違い窓記号（JIS断面記号）
-// 外枠（白抜き） ＋ 左パネル（上側・左〜中央オーバーラップ） ＋ 右パネル（下側・中央オーバーラップ〜右）
+// 引き違い窓記号（JIS平面断面記号）
+// 全オブジェクトを originX/Y:'center' + 中心座標で指定
+// → Fabric.js Group のバウンディングボックス計算が安定してズレなし
 function makeWindowObject(p1, p2) {
   const len = Math.hypot(p2.x - p1.x, p2.y - p1.y);
   if (len < 4) return null;
   const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x) * 180 / Math.PI;
   const cx = (p1.x + p2.x) / 2, cy = (p1.y + p2.y) / 2;
-  const H  = WALL_WIDTH;
-  const hl = len / 2;                  // 半分の長さ
-  const ov = Math.max(3, len * 0.08);  // 中央オーバーラップ量
+  const H  = WALL_WIDTH;  // 6px
+  const hl = len / 2;
+  const ov = hl * 0.2;   // 障子の重なり量（各側20%）
 
-  // 外枠：壁厚×開口幅の白抜き矩形（壁線を隠す）
-  const outer = new fabric.Rect({
-    left: -hl, top: -H / 2, width: len, height: H,
-    fill: '#ffffff', stroke: '#1a1a1a', strokeWidth: 1.5,
-    strokeUniform: true, originX: 'left', originY: 'top',
+  // 中心座標指定の 1px 高さ Rect（strokeWidth:0）
+  function hLine(cx, cy, w) {
+    return new fabric.Rect({
+      left: cx, top: cy, width: w, height: 1,
+      fill: '#1a1a1a', strokeWidth: 0,
+      originX: 'center', originY: 'center',
+    });
+  }
+
+  // 背景：壁を完全に隠す白抜き（中心=(0,0)、height=WALL_WIDTH）
+  const bg = new fabric.Rect({
+    left: 0, top: 0, width: len, height: H,
+    fill: '#ffffff', strokeWidth: 0,
+    originX: 'center', originY: 'center',
   });
 
-  // 左パネル（上寄り）：左端〜中央+ov、縦範囲は上半分
-  const panel1 = new fabric.Rect({
-    left: -hl + 1, top: -H / 2 + 1, width: hl + ov, height: H / 2 - 1,
-    fill: '#ffffff', stroke: '#1a1a1a', strokeWidth: 1,
-    strokeUniform: true, originX: 'left', originY: 'top',
-  });
+  // 壁外面（上端）・壁内面（下端）
+  const wTop   = hLine(0,              -(H / 2 - 0.5), len);
+  const wBot   = hLine(0,               (H / 2 - 0.5), len);
+  // 外障子（外面から1px内側、左端〜中央+ov）
+  const gOuter = hLine((-hl + ov) / 2, -(H / 2 - 1.5), hl + ov);
+  // 内障子（内面から1px内側、中央-ov〜右端）
+  const gInner = hLine((-ov + hl) / 2,  (H / 2 - 1.5), hl + ov);
 
-  // 右パネル（下寄り）：中央-ov〜右端、縦範囲は下半分
-  const panel2 = new fabric.Rect({
-    left: -ov, top: 0, width: hl + ov - 1, height: H / 2 - 1,
-    fill: '#ffffff', stroke: '#1a1a1a', strokeWidth: 1,
-    strokeUniform: true, originX: 'left', originY: 'top',
-  });
-
-  return new fabric.Group([outer, panel1, panel2], {
+  return new fabric.Group([bg, wTop, wBot, gOuter, gInner], {
     left: cx, top: cy, angle,
     originX: 'center', originY: 'center',
-    subTargetCheck: false, strokeUniform: true, lockScalingFlip: true,
+    subTargetCheck: false, lockScalingFlip: true,
     data: { type: 'window' }, _uid: uid(),
   });
 }
@@ -1383,7 +2005,7 @@ function startWindowDraw(pt) {
   draw.preview = new fabric.Rect({
     left: sp.x, top: sp.y, width: 1, height: WALL_WIDTH,
     originX: 'center', originY: 'center', angle,
-    fill: 'rgba(59,130,246,0.35)', stroke: '#3b82f6', strokeWidth: 1,
+    fill: 'rgba(217, 119, 6, 0.15)', stroke: '#d97706', strokeWidth: 1,
     selectable: false, evented: false, _isPreview: true,
   });
   canvas.add(draw.preview);
@@ -1547,8 +2169,19 @@ function flipStairsDirection(sourceObj, overrideAngle) {
 // Unified mouse events
 // -------------------------------------------------------
 canvas.on('mouse:down', (e) => {
-  // Middle-mouse pan
+  // 右クリック → 配置中のツールをキャンセルして選択ツールへ
+  if (e.e.button === 2) {
+    if (doorTool.state > 0)  { cancelDoorDraw();   setTool('select'); return; }
+    if (poly.active)         { cancelPolyDraw();   setTool('select'); return; }
+    if (modTool.room)        { cancelModifyDraw(); setTool('select'); return; }
+    if (draw.active)         { cancelDrawing();    setTool('select'); return; }
+  }
+  // Middle-mouse / Alt+drag pan
   if (e.e.button === 1 || (e.e.button === 0 && e.e.altKey)) {
+    startPan(e); return;
+  }
+  // select ツールで空白をドラッグ → パン
+  if (currentTool === 'select' && !e.target && e.e.button === 0) {
     startPan(e); return;
   }
 
@@ -1556,7 +2189,8 @@ canvas.on('mouse:down', (e) => {
 
   switch (currentTool) {
     case 'room':
-      if (!e.target) startRoomDraw(pt);
+    case 'cl-room':
+      // 1クリック目はmouse:upで処理する（2クリック確定方式）
       break;
     case 'wet-room':
       if (!e.target) startWetRoomDraw(pt);
@@ -1565,11 +2199,14 @@ canvas.on('mouse:down', (e) => {
       if (!e.target) startWallDraw(pt);
       break;
     case 'door':
-      if (!e.target) addDoor(pt.x, pt.y);
-      setTool('select');
+      handleDoorDown(canvas.getPointer(e.e));
+      break;
+    case 'indent':
+    case 'protrude':
+      handleModifyDown(canvas.getPointer(e.e), currentTool);
       break;
     case 'window':
-      startWindowDraw(pt);
+      startWindowDraw(canvas.getPointer(e.e));  // スナップなし：壁への投影で位置決め
       break;
     case 'stairs':
       if (!e.target) addStairs(pt.x, pt.y);
@@ -1600,20 +2237,26 @@ canvas.on('mouse:down', (e) => {
 canvas.on('mouse:move', (e) => {
   if (isPanning) { doPan(e); return; }
   const pt = getPointer(e);
-  if (currentTool === 'room')     updateRoomDraw(pt);
+  if (currentTool === 'room' || currentTool === 'cl-room') updateRoomDraw(pt);
   if (currentTool === 'wet-room') updateWetRoomDraw(pt);
   if (currentTool === 'wall')     updateWallDraw(pt);
-  if (currentTool === 'window')   updateWindowDraw(pt);
+  if (currentTool === 'indent' || currentTool === 'protrude') handleModifyMove(canvas.getPointer(e.e));
+  if (currentTool === 'door')     handleDoorMove(canvas.getPointer(e.e));
+  if (currentTool === 'window')   updateWindowDraw(canvas.getPointer(e.e));
   if (currentTool === 'poly')     updatePolyGuide(pt);
 });
 
 canvas.on('mouse:up', (e) => {
   if (isPanning) { stopPan(); return; }
   const pt = getPointer(e);
-  if (currentTool === 'room')     finishRoomDraw(pt);
+  if (currentTool === 'room' || currentTool === 'cl-room') {
+    if (!draw.active && !e.target) startRoomDraw(pt);   // 1クリック目: 起点を設定
+    else if (draw.active)          finishRoomDraw(pt);  // 2クリック目: 確定
+  }
   if (currentTool === 'wet-room') finishWetRoomDraw(pt);
   if (currentTool === 'wall')     finishWallDraw(pt);
-  if (currentTool === 'window')   { finishWindowDraw(pt); setTool('select'); }
+  if (currentTool === 'indent' || currentTool === 'protrude') handleModifyUp(canvas.getPointer(e.e));
+  if (currentTool === 'window')   { finishWindowDraw(canvas.getPointer(e.e)); setTool('select'); }
 });
 
 // Double-click on room rect → enter label editor
@@ -1756,9 +2399,11 @@ function updatePropsPanel() {
 
   // Rotation — step と placeholder をオブジェクト種別に合わせる
   const freeRotation = !SNAP90_TYPES.has(objType);
-  $propAngle.step        = freeRotation ? 1   : 90;
-  $propAngle.placeholder = freeRotation ? '0' : '0 / 90 / 180 / 270';
-  $propAngle.value       = Math.round(obj.angle || 0);
+  if ($propAngle) {
+    $propAngle.step        = freeRotation ? 1   : 90;
+    $propAngle.placeholder = freeRotation ? '0' : '0 / 90 / 180 / 270';
+    $propAngle.value       = Math.round(obj.angle || 0);
+  }
 
   // Show/hide room fields (room rect OR room-label both show the panel)
   const isRoom      = objType === 'room';
@@ -1834,7 +2479,7 @@ function updateScaleInfo(obj) {
   const sqmStr = sqm.toFixed(1);
   const tatamiStr = tatami.toFixed(1);
   document.getElementById('scale-info-text').textContent =
-    `${wStr}m × ${hStr}m ≈ ${sqmStr}㎡ / 約${tatamiStr}畳`;
+    `約${tatamiStr}畳 / ${sqmStr}㎡`;
 }
 
 document.getElementById('btn-apply-scale').addEventListener('click', () => {
@@ -1870,17 +2515,6 @@ $propLabelFontsize.addEventListener('change', () => {
   }
 });
 
-// Reset to auto
-document.getElementById('btn-label-fontsize-auto').addEventListener('click', () => {
-  const rect = getActiveRoom();
-  if (!rect) return;
-  delete rect.data.labelFontSize;
-  updateRoomLabelText(rect);
-  // Reflect the auto-calculated value in the input
-  const lbl = canvas.getObjects().find(o => o._uid === rect._linkedLabelId);
-  if (lbl) $propLabelFontsize.value = lbl.fontSize;
-  saveHistory();
-});
 
 function updateRoomLabelText(rectObj) {
   if (!rectObj._linkedLabelId) return;
@@ -1895,20 +2529,6 @@ function updateRoomLabelText(rectObj) {
 // Stairs direction toggle
 document.getElementById('btn-stairs-direction').addEventListener('click', () => flipStairsDirection());
 
-// Rotation（パネル手入力）
-$propAngle.addEventListener('change', () => {
-  const obj = canvas.getActiveObject();
-  if (!obj) return;
-  let angle = +$propAngle.value % 360;
-  if (angle < 0) angle += 360;
-  if (SNAP90_TYPES.has(obj.data?.type || obj.type)) {
-    angle = Math.round(angle / 90) * 90;
-    $propAngle.value = angle;
-  }
-  obj.set({ angle });
-  // object:modified を手動発火して統合ハンドラ（スナップ・履歴）を呼ぶ
-  canvas.fire('object:modified', { target: obj });
-});
 
 // 90° 回転ボタン（↺ ↻）
 function rotateBy90(dir) {
@@ -1917,7 +2537,7 @@ function rotateBy90(dir) {
   const current = obj.angle || 0;
   const next    = ((current + dir * 90) % 360 + 360) % 360;
   obj.set({ angle: next });
-  $propAngle.value = next;
+  if ($propAngle) $propAngle.value = next;
   canvas.fire('object:modified', { target: obj });
 }
 
@@ -1930,7 +2550,7 @@ function snapAngleToNearest90() {
   if (!obj) return;
   const snapped = Math.round((obj.angle || 0) / 90) * 90 % 360;
   obj.set({ angle: snapped });
-  $propAngle.value = snapped;
+  if ($propAngle) $propAngle.value = snapped;
   canvas.fire('object:modified', { target: obj });
 }
 
@@ -1958,13 +2578,42 @@ document.getElementById('btn-flip-v').addEventListener('click', () => {
 });
 
 
+// -------------------------------------------------------
+// Color picker — trigger toggle + swatch selection
+// -------------------------------------------------------
+function _cpickOpen(dropdownId) {
+  // 他方を閉じる
+  ['fill-cpick-dropdown', 'stroke-cpick-dropdown'].forEach(id => {
+    if (id !== dropdownId)
+      document.getElementById(id).classList.remove('open');
+  });
+  document.getElementById(dropdownId).classList.toggle('open');
+}
+
+// 外クリックで閉じる
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.cpick-wrap')) {
+    document.querySelectorAll('.cpick-dropdown').forEach(d => d.classList.remove('open'));
+  }
+});
+
+document.getElementById('fill-cpick-trigger').addEventListener('click', (e) => {
+  e.stopPropagation();
+  _cpickOpen('fill-cpick-dropdown');
+});
+document.getElementById('stroke-cpick-trigger').addEventListener('click', (e) => {
+  e.stopPropagation();
+  _cpickOpen('stroke-cpick-dropdown');
+});
+
 // Fill swatches
-document.getElementById('prop-fill-colors').addEventListener('click', (e) => {
+document.getElementById('fill-cpick-dropdown').addEventListener('click', (e) => {
   const sw = e.target.closest('.prop-color-swatch');
   if (!sw) return;
-  document.querySelectorAll('#prop-fill-colors .prop-color-swatch')
+  document.querySelectorAll('#fill-cpick-dropdown .prop-color-swatch')
     .forEach(s => s.classList.remove('selected'));
   sw.classList.add('selected');
+  document.getElementById('fill-cpick-dropdown').classList.remove('open');
   const obj = canvas.getActiveObject();
   if (!obj) return;
   obj.set({ fill: sw.dataset.color });
@@ -1973,12 +2622,13 @@ document.getElementById('prop-fill-colors').addEventListener('click', (e) => {
 });
 
 // Stroke swatches
-document.getElementById('prop-stroke-colors').addEventListener('click', (e) => {
+document.getElementById('stroke-cpick-dropdown').addEventListener('click', (e) => {
   const sw = e.target.closest('.prop-color-swatch');
   if (!sw) return;
-  document.querySelectorAll('#prop-stroke-colors .prop-color-swatch')
+  document.querySelectorAll('#stroke-cpick-dropdown .prop-color-swatch')
     .forEach(s => s.classList.remove('selected'));
   sw.classList.add('selected');
+  document.getElementById('stroke-cpick-dropdown').classList.remove('open');
   const obj = canvas.getActiveObject();
   if (!obj) return;
   obj.set({ stroke: sw.dataset.color });
@@ -1986,16 +2636,36 @@ document.getElementById('prop-stroke-colors').addEventListener('click', (e) => {
   canvas.fire('object:modified', { target: obj });
 });
 
+function _cpickSetTrigger(previewId, labelId, color, label) {
+  const preview = document.getElementById(previewId);
+  const lbl     = document.getElementById(labelId);
+  if (!preview || !lbl) return;
+  if (color === 'transparent') {
+    preview.style.background = 'repeating-linear-gradient(45deg,#ccc 0,#ccc 2px,#fff 0,#fff 50%) 0/8px 8px';
+  } else {
+    preview.style.background = color;
+  }
+  lbl.textContent = label || color;
+}
+
 function syncFillSwatches(color) {
-  document.querySelectorAll('#prop-fill-colors .prop-color-swatch').forEach(s => {
-    s.classList.toggle('selected', s.dataset.color === color);
+  let activeLabel = color;
+  document.querySelectorAll('#fill-cpick-dropdown .prop-color-swatch').forEach(s => {
+    const match = s.dataset.color === color;
+    s.classList.toggle('selected', match);
+    if (match) activeLabel = s.dataset.label || color;
   });
+  _cpickSetTrigger('fill-cpick-preview', 'fill-cpick-label', color, activeLabel);
 }
 
 function syncStrokeSwatches(color) {
-  document.querySelectorAll('#prop-stroke-colors .prop-color-swatch').forEach(s => {
-    s.classList.toggle('selected', s.dataset.color === color);
+  let activeLabel = color;
+  document.querySelectorAll('#stroke-cpick-dropdown .prop-color-swatch').forEach(s => {
+    const match = s.dataset.color === color;
+    s.classList.toggle('selected', match);
+    if (match) activeLabel = s.dataset.label || color;
   });
+  _cpickSetTrigger('stroke-cpick-preview', 'stroke-cpick-label', color, activeLabel);
 }
 
 // -------------------------------------------------------
@@ -2044,9 +2714,7 @@ document.addEventListener('keydown', (e) => {
 
   if (k === 'delete' || k === 'backspace') { deleteSelected(); return; }
   if (k === 'escape') {
-    cancelDrawing();
-    cancelWall();
-    cancelPolyDraw();
+    setTool('select');
     canvas.discardActiveObject();
     canvas.renderAll();
   }
@@ -2197,8 +2865,6 @@ function exportPng(multiplier, trim) {
   const name   = document.getElementById('filename-input').value || '間取り図';
   const wasVis = gridVisible;
   gridVisible  = false;
-  gridLines.forEach(l => canvas.remove(l));
-  gridLines    = [];
 
   // ズーム・パン状態に関わらず正確なバウンディングボックスを得るため
   // ビューポートを一時的にリセットする

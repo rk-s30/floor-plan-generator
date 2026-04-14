@@ -149,8 +149,8 @@
     <div class="tool-sep"></div>
 
     <div class="tool-group">
-      <!-- Room (rect) -->
-      <button class="tool-btn" id="tool-room" data-tool="room" data-tip="部屋を追加 (R)">
+      <!-- Room panel opener -->
+      <button class="tool-btn" id="tool-room-open" data-tip="部屋を追加">
         <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
              fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="18" height="18" rx="1"/>
@@ -158,13 +158,79 @@
         <span class="tool-lbl">部屋</span>
       </button>
 
-      <!-- Polygon room -->
-      <button class="tool-btn" id="tool-poly" data-tool="poly" data-tip="多角形の部屋 (P)">
+      <!-- 部屋種類パネル -->
+      <div id="room-panel" class="furniture-panel" style="display:none;">
+        <div class="furniture-panel-title">部屋の種類</div>
+        <div class="furniture-panel-grid">
+          <button class="tool-btn furniture-item" data-tool="room">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="1"/>
+            </svg>
+            <span class="tool-lbl">普通</span>
+          </button>
+          <button class="tool-btn furniture-item" data-tool="poly">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 20 8 17 18 7 18 4 8"/>
+            </svg>
+            <span class="tool-lbl">多角形</span>
+          </button>
+          <button class="tool-btn furniture-item" data-tool="cl-room">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="1"/>
+              <text x="12" y="16" text-anchor="middle" font-size="8" font-family="sans-serif"
+                    stroke="none" fill="currentColor" font-weight="bold">CL</text>
+            </svg>
+            <span class="tool-lbl">CL</span>
+          </button>
+          <button class="tool-btn furniture-item" data-wet="toilet">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="8" y="3" width="8" height="5" rx="1"/>
+              <ellipse cx="12" cy="15" rx="7" ry="7"/>
+              <ellipse cx="12" cy="15" rx="4" ry="4.5"/>
+            </svg>
+            <span class="tool-lbl">トイレ室</span>
+          </button>
+          <button class="tool-btn furniture-item" data-wet="bathtub">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="16" rx="5"/>
+              <ellipse cx="12" cy="12" rx="5" ry="6"/>
+            </svg>
+            <span class="tool-lbl">浴室</span>
+          </button>
+          <button class="tool-btn furniture-item" data-wet="sink">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="7" width="18" height="12" rx="2"/>
+              <rect x="6" y="10" width="12" height="6" rx="1"/>
+              <line x1="12" y1="5" x2="12" y2="7"/>
+              <circle cx="12" cy="13" r="1.2" fill="currentColor"/>
+            </svg>
+            <span class="tool-lbl">洗面所</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Indent (削る) -->
+      <button class="tool-btn" id="tool-indent" data-tool="indent" data-tip="部屋の一部を削る">
         <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
              fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="12 2 20 8 17 18 7 18 4 8"/>
+          <path d="M2 4 H22 V20 H15 V13 H9 V20 H2 Z"/>
         </svg>
-        <span class="tool-lbl">多角形</span>
+        <span class="tool-lbl">削る</span>
+      </button>
+
+      <!-- Protrude (出っ張らせる) -->
+      <button class="tool-btn" id="tool-protrude" data-tool="protrude" data-tip="部屋の一部を出っ張らせる">
+        <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 11 H9 V4 H15 V11 H22 V20 H2 Z"/>
+        </svg>
+        <span class="tool-lbl">出す</span>
       </button>
 
       <!-- Wall (line) -->
@@ -176,8 +242,8 @@
         <span class="tool-lbl">壁</span>
       </button>
 
-      <!-- Door -->
-      <button class="tool-btn" id="tool-door" data-tool="door" data-tip="ドア (D)">
+      <!-- Door panel opener -->
+      <button class="tool-btn" id="tool-door-open" data-tip="ドアを追加 (D)">
         <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24"
              fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M13 4H6v16h16V11"/>
@@ -185,6 +251,35 @@
         </svg>
         <span class="tool-lbl">ドア</span>
       </button>
+
+      <!-- ドア種類パネル -->
+      <div id="door-panel" class="furniture-panel" style="display:none;">
+        <div class="furniture-panel-title">ドアの種類</div>
+        <div class="furniture-panel-grid">
+          <button class="tool-btn furniture-item" data-tool="door" data-door-subtype="swing">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M13 4H6v16h16V11"/>
+              <path d="M13 4v7h7"/>
+            </svg>
+            <span class="tool-lbl">片開き</span>
+          </button>
+          <button class="tool-btn furniture-item" data-tool="door" data-door-subtype="bifold">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="2,15 12,4 22,15"/>
+            </svg>
+            <span class="tool-lbl">折り戸</span>
+          </button>
+          <button class="tool-btn furniture-item" data-tool="door" data-door-subtype="double-bifold">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="2,15 7,4 12,15 17,4 22,15"/>
+            </svg>
+            <span class="tool-lbl">2枚折り</span>
+          </button>
+        </div>
+      </div>
 
       <!-- Window -->
       <button class="tool-btn" id="tool-window" data-tool="window" data-tip="窓 (N)">
@@ -220,78 +315,81 @@
 
     <div class="tool-sep"></div>
 
-    <!-- 水回りセット -->
-    <div class="tool-group">
-      <button class="tool-btn" id="tool-wet-room" data-tip="水回り部屋を配置">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 2C8 7 5 10.5 5 14a7 7 0 0 0 14 0c0-3.5-3-7-7-12z"/>
-        </svg>
-        <span class="tool-lbl">水回り</span>
-      </button>
-    </div>
-
-    <div class="tool-sep"></div>
-
     <!-- 家具・設備 -->
     <div class="tool-group">
-      <button class="tool-btn" id="tool-toilet" data-tool="toilet" data-tip="トイレ">
+      <button class="tool-btn" id="tool-furniture-open" data-tip="家具・設備">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
              fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="8" y="3" width="8" height="5" rx="1"/>
-          <ellipse cx="12" cy="15" rx="7" ry="7"/>
-          <ellipse cx="12" cy="15" rx="4" ry="4.5"/>
+          <rect x="3" y="11" width="18" height="10" rx="2"/>
+          <path d="M6 11V7a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4"/>
+          <line x1="12" y1="11" x2="12" y2="21"/>
         </svg>
-        <span class="tool-lbl">トイレ</span>
+        <span class="tool-lbl">家具</span>
       </button>
-      <button class="tool-btn" id="tool-bathtub" data-tool="bathtub" data-tip="バスタブ">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="4" width="18" height="16" rx="5"/>
-          <ellipse cx="12" cy="12" rx="5" ry="6"/>
-        </svg>
-        <span class="tool-lbl">バスタブ</span>
-      </button>
-      <button class="tool-btn" id="tool-sink" data-tool="sink" data-tip="流し台">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="7" width="18" height="12" rx="2"/>
-          <rect x="6" y="10" width="12" height="6" rx="1"/>
-          <line x1="12" y1="5" x2="12" y2="7"/>
-          <circle cx="12" cy="13" r="1.2" fill="currentColor"/>
-        </svg>
-        <span class="tool-lbl">流し台</span>
-      </button>
-      <button class="tool-btn" id="tool-refrigerator" data-tool="refrigerator" data-tip="冷蔵庫">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="6" y="3" width="12" height="18" rx="2"/>
-          <line x1="6" y1="10" x2="18" y2="10"/>
-          <line x1="15" y1="6" x2="15" y2="9"/>
-          <line x1="15" y1="13" x2="15" y2="17"/>
-        </svg>
-        <span class="tool-lbl">冷蔵庫</span>
-      </button>
-      <button class="tool-btn" id="tool-washer" data-tool="washer" data-tip="洗濯機">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="2"/>
-          <line x1="3" y1="9" x2="21" y2="9"/>
-          <circle cx="12" cy="15" r="4"/>
-        </svg>
-        <span class="tool-lbl">洗濯機</span>
-      </button>
-      <button class="tool-btn" id="tool-stove" data-tool="stove" data-tip="コンロ">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="6" width="18" height="12" rx="2"/>
-          <circle cx="8.5" cy="10" r="2"/>
-          <circle cx="15.5" cy="10" r="2"/>
-          <circle cx="8.5" cy="15" r="2"/>
-          <circle cx="15.5" cy="15" r="2"/>
-        </svg>
-        <span class="tool-lbl">コンロ</span>
-      </button>
+
+      <!-- 家具選択パネル -->
+      <div id="furniture-panel" class="furniture-panel" style="display:none;">
+        <div class="furniture-panel-title">家具・設備</div>
+        <div class="furniture-panel-grid">
+          <button class="tool-btn furniture-item" data-tool="toilet" data-tip="トイレ">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="8" y="3" width="8" height="5" rx="1"/>
+              <ellipse cx="12" cy="15" rx="7" ry="7"/>
+              <ellipse cx="12" cy="15" rx="4" ry="4.5"/>
+            </svg>
+            <span class="tool-lbl">トイレ</span>
+          </button>
+          <button class="tool-btn furniture-item" data-tool="bathtub" data-tip="バスタブ">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="16" rx="5"/>
+              <ellipse cx="12" cy="12" rx="5" ry="6"/>
+            </svg>
+            <span class="tool-lbl">バスタブ</span>
+          </button>
+          <button class="tool-btn furniture-item" data-tool="sink" data-tip="流し台">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="7" width="18" height="12" rx="2"/>
+              <rect x="6" y="10" width="12" height="6" rx="1"/>
+              <line x1="12" y1="5" x2="12" y2="7"/>
+              <circle cx="12" cy="13" r="1.2" fill="currentColor"/>
+            </svg>
+            <span class="tool-lbl">流し台</span>
+          </button>
+          <button class="tool-btn furniture-item" data-tool="refrigerator" data-tip="冷蔵庫">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="6" y="3" width="12" height="18" rx="2"/>
+              <line x1="6" y1="10" x2="18" y2="10"/>
+              <line x1="15" y1="6" x2="15" y2="9"/>
+              <line x1="15" y1="13" x2="15" y2="17"/>
+            </svg>
+            <span class="tool-lbl">冷蔵庫</span>
+          </button>
+          <button class="tool-btn furniture-item" data-tool="washer" data-tip="洗濯機">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <line x1="3" y1="9" x2="21" y2="9"/>
+              <circle cx="12" cy="15" r="4"/>
+            </svg>
+            <span class="tool-lbl">洗濯機</span>
+          </button>
+          <button class="tool-btn furniture-item" data-tool="stove" data-tip="コンロ">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="6" width="18" height="12" rx="2"/>
+              <circle cx="8.5" cy="10" r="2"/>
+              <circle cx="15.5" cy="10" r="2"/>
+              <circle cx="8.5" cy="15" r="2"/>
+              <circle cx="15.5" cy="15" r="2"/>
+            </svg>
+            <span class="tool-lbl">コンロ</span>
+          </button>
+        </div>
+      </div>
     </div>
 
 
@@ -412,10 +510,6 @@
 
         <!-- Room-only fields -->
         <div id="prop-room-fields">
-          <div class="prop-group">
-            <label class="prop-label">部屋名</label>
-            <input class="prop-input" type="text" id="prop-label" placeholder="例: リビング">
-          </div>
           <div id="prop-scale-info" style="display:none">
             <div class="scale-info-box">
               <div class="scale-info-row">
@@ -430,6 +524,10 @@
             </div>
           </div>
           <div class="prop-group">
+            <label class="prop-label">部屋名</label>
+            <input class="prop-input" type="text" id="prop-label" placeholder="例: リビング">
+          </div>
+          <div class="prop-group">
             <label class="prop-label">畳数・面積</label>
             <input class="prop-input" type="text" id="prop-tatami" placeholder="例: 6畳 / 10.8㎡">
           </div>
@@ -438,11 +536,6 @@
             <div style="display:flex;gap:4px;align-items:center;">
               <input class="prop-input" type="number" id="prop-label-fontsize"
                      min="7" max="36" step="1" style="width:64px;text-align:center;">
-              <button class="btn btn-ghost" id="btn-label-fontsize-auto"
-                      title="部屋の広さに合わせて自動調整"
-                      style="flex:1;justify-content:center;font-size:11px;border:1px solid var(--border);">
-                自動
-              </button>
             </div>
           </div>
         </div>
@@ -469,9 +562,6 @@
             <button class="btn btn-ghost" id="btn-rotate-cw"
                     title="90° 時計回り ( ] )"
                     style="padding:4px 7px;font-size:13px;border:1px solid var(--border);">↻</button>
-            <input class="prop-input" type="number" id="prop-angle"
-                   min="0" max="360" step="15" placeholder="0"
-                   style="flex:1;min-width:0;">
             <button class="btn btn-ghost" id="btn-flip-h" title="左右反転"
                     style="padding:4px 7px;font-size:11px;border:1px solid var(--border);">↔</button>
             <button class="btn btn-ghost" id="btn-flip-v" title="上下反転"
@@ -493,25 +583,45 @@
 
         <div class="prop-group">
           <label class="prop-label">塗りつぶし</label>
-          <div class="prop-colors" id="prop-fill-colors">
-            <div class="prop-color-swatch selected" data-color="#ffffff" style="background:#ffffff;border:1px solid #ddd" title="白"></div>
-            <div class="prop-color-swatch" data-color="#f3f0e8" style="background:#f3f0e8" title="クリーム"></div>
-            <div class="prop-color-swatch" data-color="#dbeafe" style="background:#dbeafe" title="水色"></div>
-            <div class="prop-color-swatch" data-color="#dcfce7" style="background:#dcfce7" title="薄緑"></div>
-            <div class="prop-color-swatch" data-color="#fef9c3" style="background:#fef9c3" title="薄黄"></div>
-            <div class="prop-color-swatch" data-color="#fce7f3" style="background:#fce7f3" title="ピンク"></div>
-            <div class="prop-color-swatch" data-color="transparent" style="background: repeating-linear-gradient(45deg,#ccc 0,#ccc 2px,#fff 0,#fff 50%) 0/8px 8px" title="透明"></div>
+          <div class="cpick-wrap" id="fill-cpick-wrap">
+            <button class="cpick-trigger" id="fill-cpick-trigger">
+              <span class="cpick-preview" id="fill-cpick-preview"></span>
+              <span class="cpick-label"  id="fill-cpick-label">白</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+            <div class="cpick-dropdown" id="fill-cpick-dropdown">
+              <div class="prop-color-swatch selected" data-color="#ffffff" data-label="白"       style="background:#ffffff;border:1px solid #ddd"></div>
+              <div class="prop-color-swatch"          data-color="#f3f0e8" data-label="クリーム"  style="background:#f3f0e8"></div>
+              <div class="prop-color-swatch"          data-color="#dbeafe" data-label="水色"     style="background:#dbeafe"></div>
+              <div class="prop-color-swatch"          data-color="#dcfce7" data-label="薄緑"     style="background:#dcfce7"></div>
+              <div class="prop-color-swatch"          data-color="#fef9c3" data-label="薄黄"     style="background:#fef9c3"></div>
+              <div class="prop-color-swatch"          data-color="#fce7f3" data-label="ピンク"   style="background:#fce7f3"></div>
+              <div class="prop-color-swatch"          data-color="transparent" data-label="透明" style="background:repeating-linear-gradient(45deg,#ccc 0,#ccc 2px,#fff 0,#fff 50%) 0/8px 8px"></div>
+            </div>
           </div>
         </div>
 
         <div class="prop-group">
           <label class="prop-label">枠線の色</label>
-          <div class="prop-colors" id="prop-stroke-colors">
-            <div class="prop-color-swatch selected" data-color="#1a1a1a" style="background:#1a1a1a" title="黒"></div>
-            <div class="prop-color-swatch" data-color="#374151" style="background:#374151" title="ダークグレー"></div>
-            <div class="prop-color-swatch" data-color="#6b7280" style="background:#6b7280" title="グレー"></div>
-            <div class="prop-color-swatch" data-color="#d97706" style="background:#d97706" title="オレンジ"></div>
-            <div class="prop-color-swatch" data-color="#2563eb" style="background:#2563eb" title="青"></div>
+          <div class="cpick-wrap" id="stroke-cpick-wrap">
+            <button class="cpick-trigger" id="stroke-cpick-trigger">
+              <span class="cpick-preview" id="stroke-cpick-preview"></span>
+              <span class="cpick-label"  id="stroke-cpick-label">黒</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+            <div class="cpick-dropdown" id="stroke-cpick-dropdown">
+              <div class="prop-color-swatch selected" data-color="#1a1a1a" data-label="黒"          style="background:#1a1a1a"></div>
+              <div class="prop-color-swatch"          data-color="#374151" data-label="ダークグレー" style="background:#374151"></div>
+              <div class="prop-color-swatch"          data-color="#6b7280" data-label="グレー"      style="background:#6b7280"></div>
+              <div class="prop-color-swatch"          data-color="#d97706" data-label="オレンジ"    style="background:#d97706"></div>
+              <div class="prop-color-swatch"          data-color="#2563eb" data-label="青"          style="background:#2563eb"></div>
+            </div>
           </div>
         </div>
 
@@ -620,35 +730,6 @@
 <div id="toast-container"></div>
 
 <!-- Wet room flyout -->
-<div id="wet-flyout" class="wet-flyout" style="display:none;">
-  <button class="wet-flyout-item" data-wet="toilet">
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
-         fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="8" y="3" width="8" height="5" rx="1"/>
-      <ellipse cx="12" cy="15" rx="7" ry="7"/>
-      <ellipse cx="12" cy="15" rx="4" ry="4.5"/>
-    </svg>
-    トイレ室
-  </button>
-  <button class="wet-flyout-item" data-wet="bathtub">
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
-         fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="3" y="4" width="18" height="16" rx="5"/>
-      <ellipse cx="12" cy="12" rx="5" ry="6"/>
-    </svg>
-    浴室
-  </button>
-  <button class="wet-flyout-item" data-wet="sink">
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
-         fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="3" y="7" width="18" height="12" rx="2"/>
-      <rect x="6" y="10" width="12" height="6" rx="1"/>
-      <line x1="12" y1="5" x2="12" y2="7"/>
-      <circle cx="12" cy="13" r="1.2" fill="currentColor"/>
-    </svg>
-    洗面所
-  </button>
-</div>
 
 <!-- Fabric.js CDN -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>

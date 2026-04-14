@@ -314,37 +314,6 @@ input, select, textarea { font-family: inherit; color: inherit; }
 }
 
 /* Wet room flyout */
-.wet-flyout {
-  position: fixed;
-  z-index: 500;
-  background: var(--bg-overlay);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-  min-width: 110px;
-}
-.wet-flyout-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border: none;
-  background: transparent;
-  color: var(--text-primary);
-  font-size: 12px;
-  font-family: 'Inter', sans-serif;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.wet-flyout-item:hover {
-  background: var(--bg-hover);
-  color: var(--accent);
-}
 
 /* Per-object snap toggle in properties panel */
 .toggle-row {
@@ -509,7 +478,6 @@ input, select, textarea { font-family: inherit; color: inherit; }
   display: flex;
   align-items: center;
   justify-content: center;
-  pointer-events: none;
   z-index: 10;
 }
 
@@ -522,7 +490,6 @@ input, select, textarea { font-family: inherit; color: inherit; }
   padding: 28px 32px;
   width: 360px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.35);
-  pointer-events: auto;
 }
 
 .welcome-title {
@@ -645,13 +612,54 @@ input, select, textarea { font-family: inherit; color: inherit; }
   gap: 6px;
 }
 
-/* Color swatch picker */
-.prop-colors {
+/* Color picker — trigger + dropdown */
+.cpick-wrap {
+  position: relative;
+}
+
+.cpick-trigger {
   display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  background: var(--bg-input, var(--bg-hover));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.cpick-trigger:hover { border-color: var(--accent); }
+
+.cpick-preview {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  border: 1px solid rgba(0,0,0,0.15);
+  flex-shrink: 0;
+}
+
+.cpick-label { flex: 1; text-align: left; }
+
+.cpick-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 4px;
+  z-index: 50;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
 }
+
+.cpick-dropdown.open { display: flex; }
 
 .prop-color-swatch {
   width: 26px;
@@ -813,6 +821,38 @@ input, select, textarea { font-family: inherit; color: inherit; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ----- Furniture Panel ----- */
+.furniture-panel {
+  position: fixed;
+  z-index: 200;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  padding: 8px;
+  min-width: 148px;
+}
+.furniture-panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 0 2px 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+.furniture-panel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.furniture-item {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 6px;
 }
 
 /* ----- Template Modal ----- */
