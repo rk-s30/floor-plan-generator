@@ -418,27 +418,6 @@ input, select, textarea { font-family: inherit; color: inherit; }
   color: var(--accent);
 }
 
-/* Tooltip */
-.tool-btn::after {
-  content: attr(data-tip);
-  position: absolute;
-  left: calc(100% + 8px);
-  top: 50%;
-  transform: translateY(-50%);
-  background: var(--bg-overlay);
-  border: 1px solid var(--border);
-  color: var(--text-primary);
-  font-size: 11px;
-  white-space: nowrap;
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity var(--transition);
-  z-index: 100;
-}
-
-.tool-btn:hover::after { opacity: 1; }
 
 /* ----- Canvas area ----- */
 .editor-canvas-wrap {

@@ -23,7 +23,7 @@ const GRID_COLOR      = '#c8c4bc';
 const GRID_COLOR_MAJOR= '#aeaaa0';
 const MIN_ROOM_SIZE   = GRID_SIZE * 2;  // 40px minimum
 const WALL_WIDTH      = 6;             // default stroke width for walls and rooms
-const FURNITURE_TOOLS = new Set(['toilet','bathtub','sink','refrigerator','washer','stove']);
+const FURNITURE_TOOLS = new Set(['toilet','bathtub','sink','refrigerator','washer','stove','kitchen','counter']);
 const ROOM_TOOLS      = new Set(['room','cl-room','poly','wet-room']);
 
 // Fixed room widths for wet rooms (furniture fills this width)
@@ -150,9 +150,12 @@ updateObjectCount();
 // -------------------------------------------------------
 function snap(v) { return Math.round(v / GRID_SIZE) * GRID_SIZE; }
 
+// 壁・部屋を描画するツール群 — グローバルスナップOFFでも常にグリッドスナップ
+const WALL_SNAP_TOOLS = new Set(['room', 'cl-room', 'wet-room', 'wall', 'poly', 'indent', 'protrude']);
+
 function getPointer(e) {
   const pt = canvas.getPointer(e.e);
-  if (snapEnabled) return { x: snap(pt.x), y: snap(pt.y) };
+  if (snapEnabled || WALL_SNAP_TOOLS.has(currentTool)) return { x: snap(pt.x), y: snap(pt.y) };
   return pt;
 }
 
@@ -183,6 +186,15 @@ function loadState(jsonStr) {
       if (o.data?.isWetFurniture) {
         o.selectable = false;
         o.evented    = false;
+      }
+      // 壁：カスタム端点コントロールを再適用（JSON復元で controls は失われるため）
+      if (o.type === 'line' && o.data?.type === 'wall') {
+        applyWallControls(o);
+      }
+      // 窓：幅方向ロック＆ハンドル制限を再適用（JSON復元で失われるため）
+      if (o.data?.type === 'window') {
+        o.set({ lockScalingY: true });
+        o.setControlsVisibility({ mt: false, mb: false, tl: false, tr: false, bl: false, br: false });
       }
     });
     drawGrid();
@@ -239,7 +251,7 @@ const TOOL_LABELS = {
   indent: '削る', protrude: '出す',
   wall: '壁', door: 'ドア', window: '窓', stairs: '階段', text: 'テキスト',
   toilet: 'トイレ', bathtub: 'バスタブ', sink: '流し台',
-  refrigerator: '冷蔵庫', washer: '洗濯機', stove: 'コンロ',
+  refrigerator: '冷蔵庫', washer: '洗濯機', stove: 'コンロ', kitchen: 'キッチン', counter: '台',
 };
 
 function setTool(name) {
@@ -249,6 +261,7 @@ function setTool(name) {
   cancelPolyDraw();
   cancelModifyDraw();
   cancelDoorDraw();
+  if (stairTool.active) cancelStairDraw();
 
   currentTool = name;
 
@@ -294,7 +307,7 @@ function setTool(name) {
     indent:     '壁をクリック(起点) → 自由点を任意個クリック → 壁をクリック(終点)で確定 / Esc でキャンセル',
     protrude:   '壁をクリック(起点) → 自由点を任意個クリック → 壁をクリック(終点)で確定 / Esc でキャンセル',
     window:     '壁の上をドラッグして窓を挿入',
-    stairs:     'クリックで配置 / [ ] で回転',
+    stairs:     '① 幅辺の起点をクリック → ② 終点をクリック（幅が決まる）→ ③ 長さ方向をクリックで配置 / Esc でキャンセル',
     text:       'クリックでテキストを配置 / ダブルクリックで編集',
     'wet-room':  'ドラッグで水回り部屋を描く',
     toilet:     'クリックで配置 / [ ] で回転',
@@ -303,6 +316,8 @@ function setTool(name) {
     refrigerator: 'クリックで配置 / [ ] で回転',
     washer:     'クリックで配置 / [ ] で回転',
     stove:      'クリックで配置 / [ ] で回転',
+    kitchen:    'クリックで配置 / [ ] で回転',
+    counter:    'クリックで配置 / [ ] で回転',
   };
   const hint    = TOOL_HINTS[name] || '';
   const $hint   = document.getElementById('status-hint');
@@ -490,7 +505,7 @@ function finishRoomDraw(pt) {
 // -------------------------------------------------------
 // 家具プレビューの位置・スケール・角度を計算して適用する
 function _applyFurPreview(fur, type, roomX, roomY, w, h) {
-  const NAT_SIZE = { toilet: [40, 80], bathtub: [80, 120], sink: [80, 60] };
+  const NAT_SIZE = { toilet: [40, 80], bathtub: [80, 40], sink: [80, 60] };
   const pad = WALL_WIDTH + 4;
   const availW = w - pad * 2, availH = h - pad * 2;
   if (availW <= 0 || availH <= 0) return;
@@ -513,13 +528,14 @@ function _applyFurPreview(fur, type, roomX, roomY, w, h) {
     if (!isLandscape) { visualW = natW * scaleX; visualH = natH * scaleY; }
     else              { visualW = natH * scaleY; visualH = natW * scaleX; }
   } else if (type === 'bathtub') {
+    // 横長バスタブ(80×40): 縦長部屋→0°そのまま、横長部屋→90°回転
     const sBase = Math.sqrt(availW * availH * 0.60 / (natW * natH));
     if (!isLandscape) {
-      const s = Math.min(sBase, availW / natH, availH / natW);
-      scaleX = scaleY = s; visualW = natH * s; visualH = natW * s;
-    } else {
       const s = Math.min(sBase, availW / natW, availH / natH);
       scaleX = scaleY = s; visualW = natW * s; visualH = natH * s;
+    } else {
+      const s = Math.min(sBase, availW / natH, availH / natW);
+      scaleX = scaleY = s; visualW = natH * s; visualH = natW * s;
     }
   } else {
     const sBase = Math.sqrt(availW * availH * 0.30 / (natW * natH));
@@ -533,8 +549,8 @@ function _applyFurPreview(fur, type, roomX, roomY, w, h) {
   }
 
   const furAngle  = type === 'bathtub'
-    ? (isLandscape ? 180 : 90)
-    : (isLandscape ? 90 : (type === 'toilet' ? 180 : 0));
+    ? (isLandscape ? 90 : 0)
+    : (isLandscape ? 90 : 180);
   const cxCanvas  = roomX + (!isLandscape ? w / 2 : w - visualW / 2 - pad);
   const cyCanvas  = roomY + (!isLandscape ? h - visualH / 2 - pad : h / 2);
 
@@ -629,7 +645,7 @@ function recalcWetFurniture(rectObj) {
   const type = rectObj._wetFurnitureType;
   const w    = rectObj.getScaledWidth();
   const h    = rectObj.getScaledHeight();
-  const NAT_SIZE = { toilet: [40, 80], bathtub: [80, 120], sink: [80, 60] };
+  const NAT_SIZE = { toilet: [40, 80], bathtub: [80, 40], sink: [80, 60] };
   const pad  = WALL_WIDTH + 4;
   const availW = w - pad * 2;
   const availH = h - pad * 2;
@@ -651,13 +667,14 @@ function recalcWetFurniture(rectObj) {
       if (scaleY < scaleX * ASPECT) scaleX = scaleY / ASPECT;
     }
   } else if (type === 'bathtub') {
+    // 横長バスタブ(80×40): 縦長部屋→0°そのまま、横長部屋→90°回転
     const sBase = Math.sqrt(availW * availH * 0.60 / (natW * natH));
     if (!isLandscape) {
-      const s = Math.min(sBase, availW / natH, availH / natW);
-      scaleX = scaleY = s; visualW = natH * s; visualH = natW * s;
-    } else {
       const s = Math.min(sBase, availW / natW, availH / natH);
       scaleX = scaleY = s; visualW = natW * s; visualH = natH * s;
+    } else {
+      const s = Math.min(sBase, availW / natH, availH / natW);
+      scaleX = scaleY = s; visualW = natH * s; visualH = natW * s;
     }
   } else {
     // 洗面所：部屋面積の約30%（縦長=0°、横長=90°回転）
@@ -675,8 +692,8 @@ function recalcWetFurniture(rectObj) {
   }
 
   const furAngle = type === 'bathtub'
-    ? (isLandscape ? 180 : 90)
-    : (isLandscape ? 90 : (type === 'toilet' ? 180 : 0));
+    ? (isLandscape ? 90 : 0)
+    : (isLandscape ? 90 : 180);
 
   // 部屋中心からの相対オフセット（ローカル座標）を更新
   const cxLocal = !isLandscape ? w / 2 : w - visualW / 2 - pad;
@@ -852,7 +869,7 @@ function syncWetFurniture(rectObj) {
 // Rotation snap — Fabric.js 組み込み snapAngle を使用
 // ハードスナップより滑らか（ snapThreshold 内に入ったときだけスナップ）
 // -------------------------------------------------------
-const SNAP90_TYPES = new Set(['room', 'wall', 'door', 'window', 'stairs', 'toilet', 'bathtub', 'sink', 'refrigerator', 'washer', 'stove']);
+const SNAP90_TYPES = new Set(['room', 'wall', 'door', 'window', 'stairs', 'toilet', 'bathtub', 'sink', 'refrigerator', 'washer', 'stove', 'kitchen', 'counter']);
 
 function applyRotationSnapSetting(obj) {
   if (!obj) { canvas.snapAngle = 0; return; }
@@ -898,33 +915,77 @@ canvas.on('object:modified', (e) => {
   const obj = e.target;
   if (!obj || obj._isGrid) return;
 
-  if (snapEnabled && !obj.data?.snapDisabled) {
-    // 位置スナップ（窓は壁上に固定されるのでスキップ）
-    if (obj.data?.type !== 'window') {
-      obj.set({
-        left: snap(obj.left),
-        top:  snap(obj.top),
-      });
-    }
+  // キッチン幅リサイズ: scaleX を使わず正しい寸法でグループ再生成
+  if (obj.data?.type === 'kitchen' && (e.action || '').startsWith('scale')) {
+    const newW = Math.max(GRID_SIZE * 7, snapEnabled ? snap(obj.getScaledWidth()) : obj.getScaledWidth());
+    if (snapEnabled) obj.set({ left: snap(obj.left), top: snap(obj.top) });
+    obj.setCoords();
+    historyPaused = true;
+    _rebuildKitchen(obj, newW);
+    historyPaused = false;
+    updatePropsPanel();
+    saveHistory();
+    return;
+  }
 
-    // サイズスナップ（Line・テキスト・窓以外）
-    if (obj.type !== 'line' && obj.type !== 'i-text' && obj.type !== 'text'
-        && obj.data?.type !== 'window') {
-      const snappedW = Math.max(snap(obj.getScaledWidth()),  MIN_ROOM_SIZE);
-      const snappedH = Math.max(snap(obj.getScaledHeight()), MIN_ROOM_SIZE);
-      obj.set({
-        scaleX: snappedW / obj.width,
-        scaleY: snappedH / obj.height,
-      });
-    }
+  // 部屋・壁はスナップ設定に関わらず常にグリッドスナップ
+  const _forceSnap = obj.data?.type === 'room' || obj.data?.type === 'wall';
+  if ((snapEnabled || _forceSnap) && !obj.data?.snapDisabled) {
 
-    // 窓：長さ方向のみスナップ、位置・厚さはスナップしない
-    if (obj.data?.type === 'window') {
-      const snappedW = Math.max(snap(obj.getScaledWidth()), GRID_SIZE);
-      obj.set({ scaleX: snappedW / obj.width });
-    }
+    // 壁（Line）: 移動・ストレッチともに端点をスナップしてスケールをベイク
+    // center(left/top)スナップだと半長がGRID_SIZE奇数倍の壁で端点がグリッド外になるため
+    if (obj.type === 'line' && obj.data?.type === 'wall') {
+      const action = e.action || '';
+      const [sp1, sp2] = getWallEndpoints(obj);  // 実際のキャンバス上の視覚的端点位置
 
-    canvas.renderAll();
+      let nvP1x = snap(sp1.x), nvP1y = snap(sp1.y);
+      let nvP2x, nvP2y;
+
+      if (action.startsWith('scale') || action === 'modifyWallEndpoint') {
+        // ストレッチ / 端点ドラッグ: 両端点を独立にスナップ
+        nvP2x = snap(sp2.x);
+        nvP2y = snap(sp2.y);
+      } else {
+        // 移動: P1をスナップしてベクトルを保持（壁の長さ・向きを変えない）
+        nvP2x = nvP1x + (sp2.x - sp1.x);
+        nvP2y = nvP1y + (sp2.y - sp1.y);
+      }
+
+      // スナップ済みの視覚端点をそのまま x1,y1,x2,y2 にベイクし、
+      // _setWidthHeight() で left/top/width/height を再計算させる。
+      // ※ Fabric.js は set() 時に _setWidthHeight を自動呼び出ししないため明示的に呼ぶ。
+      obj.set({ x1: nvP1x, y1: nvP1y, x2: nvP2x, y2: nvP2y, scaleX: 1, scaleY: 1 });
+      obj._setWidthHeight();
+      obj.setCoords();
+      canvas.renderAll();
+    } else {
+      // 位置スナップ（窓は壁上に固定されるのでスキップ）
+      if (obj.data?.type !== 'window') {
+        obj.set({
+          left: snap(obj.left),
+          top:  snap(obj.top),
+        });
+      }
+
+      // サイズスナップ（Line・テキスト・窓以外）
+      if (obj.type !== 'line' && obj.type !== 'i-text' && obj.type !== 'text'
+          && obj.data?.type !== 'window') {
+        const snappedW = Math.max(snap(obj.getScaledWidth()),  MIN_ROOM_SIZE);
+        const snappedH = Math.max(snap(obj.getScaledHeight()), MIN_ROOM_SIZE);
+        obj.set({
+          scaleX: snappedW / obj.width,
+          scaleY: snappedH / obj.height,
+        });
+      }
+
+      // 窓：長さ方向のみスナップ、位置・厚さはスナップしない
+      if (obj.data?.type === 'window') {
+        const snappedW = Math.max(snap(obj.getScaledWidth()), GRID_SIZE);
+        obj.set({ scaleX: snappedW / obj.width });
+      }
+
+      canvas.renderAll();
+    }
   }
 
   if (obj._wetFurnitureId) {
@@ -936,17 +997,7 @@ canvas.on('object:modified', (e) => {
     syncLabel(obj);
   }
 
-  // 階段：180° / 270° は UP/DN を反転して 0° / 90° に正規化
-  // → テキストが逆さまになる角度を排除する
-  if (obj.data?.type === 'stairs') {
-    const angle = ((obj.angle % 360) + 360) % 360;
-    if (angle === 180 || angle === 270) {
-      // requestAnimationFrame で現在のイベントサイクル外に逃がして安全に再生成
-      const captured = obj;
-      requestAnimationFrame(() => flipStairsDirection(captured, angle - 180));
-      return; // saveHistory は flipStairsDirection 内で呼ばれる
-    }
-  }
+
 
   updatePropsPanel();
   // リサイズ後に実寸参考を更新
@@ -968,6 +1019,71 @@ canvas.on('object:removed', (e) => {
   }
   updateObjectCount();
 });
+
+// -------------------------------------------------------
+// Wall endpoint custom controls
+// スケールハンドルの代わりに両端点を直接ドラッグできるハンドルを配置する。
+// scaleX/Y を一切使わないため「伸ばし中に太さ変化」「lockScalingFlip で固まる」が根本解決。
+// -------------------------------------------------------
+function _wallEndpointPositionHandler(which) {
+  return function(dim, finalMatrix, obj) {
+    // calcLinePoints() が Fabric のレンダリングで使う端点ローカル座標を返す
+    // （x1,y1 を直接使うと sw/2 ずれるためこちらを使う）
+    const p   = obj.calcLinePoints();
+    const lx  = which === 1 ? p.x1 : p.x2;
+    const ly  = which === 1 ? p.y1 : p.y2;
+    const vpt = (obj.canvas && obj.canvas.viewportTransform) || [1,0,0,1,0,0];
+    return fabric.util.transformPoint(
+      { x: lx, y: ly },
+      fabric.util.multiplyTransformMatrices(vpt, obj.calcTransformMatrix())
+    );
+  };
+}
+
+function _wallEndpointActionHandler(which) {
+  return function(eventData, transform, x, y) {
+    const obj = transform.target;
+    const sx = snap(x), sy = snap(y);
+    if (which === 1) { obj.set({ x1: sx, y1: sy }); }
+    else             { obj.set({ x2: sx, y2: sy }); }
+    obj._setWidthHeight();
+    obj.setCoords();
+    return true;
+  };
+}
+
+function _renderWallHandle(ctx, left, top) {
+  ctx.save();
+  ctx.fillStyle   = '#d97706';
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth   = 2;
+  ctx.beginPath();
+  ctx.arc(left, top, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+const WALL_ENDPOINT_CONTROLS = {
+  ep1: new fabric.Control({
+    x: 0, y: 0, cursorStyle: 'crosshair',
+    actionName:      'modifyWallEndpoint',
+    positionHandler: _wallEndpointPositionHandler(1),
+    actionHandler:   _wallEndpointActionHandler(1),
+    render: function(ctx, left, top) { _renderWallHandle(ctx, left, top); },
+  }),
+  ep2: new fabric.Control({
+    x: 0, y: 0, cursorStyle: 'crosshair',
+    actionName:      'modifyWallEndpoint',
+    positionHandler: _wallEndpointPositionHandler(2),
+    actionHandler:   _wallEndpointActionHandler(2),
+    render: function(ctx, left, top) { _renderWallHandle(ctx, left, top); },
+  }),
+};
+
+function applyWallControls(line) {
+  line.controls = WALL_ENDPOINT_CONTROLS;
+}
 
 // -------------------------------------------------------
 // Wall — drag to draw a single line segment
@@ -1005,12 +1121,13 @@ function finishWallDraw(pt) {
   const line = new fabric.Line([x1, y1, x2, y2], {
     stroke: '#1a1a1a', strokeWidth: WALL_WIDTH,
     strokeLineCap: 'square',
-    strokeUniform: true, lockScalingFlip: true,
+    strokeUniform: true,
     selectable: true, evented: true,
     hasControls: true,
     data: { type: 'wall' },
     _uid: uid(),
   });
+  applyWallControls(line);
   canvas.add(line);
   canvas.setActiveObject(line);
   updateObjectCount();
@@ -1194,57 +1311,76 @@ function makeFurnitureGroup(objects, x, y, type, label) {
   saveHistory();
 }
 
-// トイレ (W=40, H=80)
+// トイレ (W=40, H=80) — 蓋閉じ状態・レバー付き
+// 各Pathは中心(0,0)基準で記述し left/top で配置（バスタブと同方式）
 function addToilet(x, y) {
-  const W = GRID_SIZE * 2, H = GRID_SIZE * 4, TH = 16;
+  const W = GRID_SIZE * 2, H = GRID_SIZE * 4;
   makeFurnitureGroup([
-    new fabric.Rect({ left:0, top:0, width:W, height:TH,
-      fill:'#ccc9c0', stroke:'#1a1a1a', strokeWidth:1.5, strokeUniform:true,
-      originX:'left', originY:'top' }),
-    new fabric.Rect({ left:0, top:TH, width:W, height:H-TH, rx:W*0.4, ry:(H-TH)*0.3,
-      fill:'#fff', stroke:'#1a1a1a', strokeWidth:1.5, strokeUniform:true,
-      originX:'left', originY:'top' }),
-    new fabric.Ellipse({ left:W*0.1, top:TH+(H-TH)*0.08, rx:W*0.4, ry:(H-TH)*0.41,
-      fill:'#e8e5e0', stroke:'#1a1a1a', strokeWidth:1, strokeUniform:true,
+    // 便器外形（上辺直線・下部半円）: bbox x=2-38 y=17-79 → center(20,48)
+    new fabric.Path('M -18,-31 L 18,-31 L 18,3 Q 18,31 0,31 Q -18,31 -18,3 Z', {
+      left:20, top:48,
+      fill:'#ffffff', stroke:'#1a1a1a', strokeWidth:1.5, strokeUniform:true,
+      originX:'center', originY:'center' }),
+    // タンク＋レバー（一体パス）: bbox x=4-40 y=1-17 → center(22,9)
+    new fabric.Path('M -15,-8 L 11,-8 Q 14,-8 14,-4 L 14,-3 L 17,-3 Q 18,-3 18,-2 L 18,1 Q 18,2 17,2 L 14,2 L 14,4 Q 14,8 11,8 L -15,8 Q -18,8 -18,4 L -18,-4 Q -18,-8 -15,-8 Z', {
+      left:22, top:9,
+      fill:'#ffffff', stroke:'#1a1a1a', strokeWidth:1.5, strokeUniform:true,
+      originX:'center', originY:'center' }),
+    // 蓋: bbox x=5-35 y=20-76 → center(20,48)
+    new fabric.Path('M -15,-28 L 15,-28 L 15,3 Q 15,28 0,28 Q -15,28 -15,3 Z', {
+      left:20, top:48,
+      fill:'#ffffff', stroke:'#1a1a1a', strokeWidth:1.5, strokeUniform:true,
+      originX:'center', originY:'center' }),
+    // ヒンジ（タンク・蓋の境界）
+    new fabric.Rect({ left:16, top:17, width:8, height:3, rx:1,
+      fill:'#ffffff', stroke:'#1a1a1a', strokeWidth:1, strokeUniform:true,
       originX:'left', originY:'top' }),
   ], x, y, 'toilet', 'トイレ');
 }
 
-// バスタブ (W=80, H=120)
+// バスタブ (W=80, H=40) — 横長・排水穴左側
 function addBathtub(x, y) {
-  const W = GRID_SIZE * 4, H = GRID_SIZE * 6;
+  const W = GRID_SIZE * 4, H = GRID_SIZE * 2;
   makeFurnitureGroup([
-    new fabric.Rect({ left:0, top:0, width:W, height:H, rx:10, ry:10,
+    // 外枠: 角丸長方形
+    new fabric.Rect({ left:0, top:0, width:W, height:H, rx:6, ry:6,
       fill:'#fff', stroke:'#1a1a1a', strokeWidth:1.5, strokeUniform:true,
       originX:'left', originY:'top' }),
-    new fabric.Ellipse({ left:W*0.14, top:H*0.17, rx:W*0.36, ry:H*0.34,
-      fill:'#d4eef7', stroke:'#5ba4c4', strokeWidth:1, strokeUniform:true,
-      originX:'left', originY:'top' }),
-    new fabric.Rect({ left:W*0.38, top:H*0.04, width:W*0.24, height:H*0.07,
-      rx:2, fill:'#888', stroke:null,
-      originX:'left', originY:'top' }),
-    new fabric.Circle({ left:W*0.44, top:H*0.87, radius:W*0.06,
-      fill:'#888', stroke:null,
-      originX:'left', originY:'top' }),
+    // 内側: 上下直線・左右半円のスタジアム形（座標は中心(W/2,H/2)=(40,20)基準）
+    new fabric.Path('M -20,-16 L 20,-16 A 16,16 0 0 1 20,16 L -20,16 A 16,16 0 0 1 -20,-16 Z', {
+      left:W/2, top:H/2,
+      fill:'transparent', stroke:'#1a1a1a', strokeWidth:1.5, strokeUniform:true,
+      originX:'center', originY:'center' }),
+    // 排水穴（左側）
+    new fabric.Circle({ left:10, top:H/2, radius:2,
+      fill:'transparent', stroke:'#1a1a1a', strokeWidth:1.5, strokeUniform:true,
+      originX:'center', originY:'center' }),
   ], x, y, 'bathtub', 'バスタブ');
 }
 
 // 流し台 (W=80, H=60)
 function addSink(x, y) {
   const W = GRID_SIZE * 4, H = GRID_SIZE * 3;
+  const sw = { stroke: '#1a1a1a', strokeWidth: 1.5, strokeUniform: true };
   makeFurnitureGroup([
-    new fabric.Rect({ left:0, top:0, width:W, height:H,
-      fill:'#e0ddd8', stroke:'#1a1a1a', strokeWidth:1.5, strokeUniform:true,
-      originX:'left', originY:'top' }),
-    new fabric.Rect({ left:W*0.1, top:H*0.14, width:W*0.8, height:H*0.72, rx:4,
-      fill:'#fff', stroke:'#1a1a1a', strokeWidth:1, strokeUniform:true,
-      originX:'left', originY:'top' }),
-    new fabric.Circle({ left:W*0.44, top:H*0.42, radius:W*0.08,
-      fill:'#aaa', stroke:null,
-      originX:'left', originY:'top' }),
-    new fabric.Rect({ left:W*0.43, top:H*0.05, width:W*0.14, height:H*0.2,
-      rx:2, fill:'#888', stroke:null,
-      originX:'left', originY:'top' }),
+    // 外枠（カウンター）
+    new fabric.Rect({ left:0, top:0, width:W, height:H, rx:3,
+      fill:'white', ...sw, originX:'left', originY:'top' }),
+    // シンク槽
+    new fabric.Rect({ left:8, top:9, width:64, height:46, rx:4,
+      fill:'white', ...sw, originX:'left', originY:'top' }),
+    // 蛇口：ハンドルバー
+    new fabric.Rect({ left:26, top:12, width:28, height:4, rx:2,
+      fill:'white', ...sw, originX:'left', originY:'top' }),
+    // 蛇口：台座
+    new fabric.Rect({ left:37, top:10, width:6, height:8, rx:2,
+      fill:'white', ...sw, originX:'left', originY:'top' }),
+    // 蛇口：スパウト
+    new fabric.Rect({ left:38.5, top:17, width:3, height:12, rx:1.5,
+      fill:'white', ...sw, originX:'left', originY:'top' }),
+    // 排水口
+    new fabric.Circle({ left:40, top:44, radius:3,
+      fill:'white', ...sw, originX:'center', originY:'center' }),
   ], x, y, 'sink', '流し台');
 }
 
@@ -1278,32 +1414,138 @@ function addWasher(x, y) {
   ], x, y, 'washer', '洗濯機');
 }
 
-// コンロ (W=80, H=60) — 4口
+// コンロ (W=80, H=60) — 4口バーナー（アウトラインのみ）
 function addStove(x, y) {
-  const W = GRID_SIZE * 4, H = GRID_SIZE * 3;
-  const br = W * 0.13; // burner outer radius
-  const positions = [
-    [W*0.22, H*0.27], [W*0.78, H*0.27],
-    [W*0.22, H*0.73], [W*0.78, H*0.73],
+  const W = GRID_SIZE * 4, H = GRID_SIZE * 3; // 80 x 60
+  const OR = 10, IR = 5, SI = 5, SO = 8;       // 外円r, 内円r, スポーク内端r, 外端r
+  const centers = [
+    [23, 17], [57, 17],
+    [23, 43], [57, 43],
   ];
+  const sw = { stroke: '#1a1a1a', strokeWidth: 1.5, strokeUniform: true };
+
   const objs = [
     new fabric.Rect({ left:0, top:0, width:W, height:H, rx:3,
-      fill:'#3a3a3a', stroke:'#1a1a1a', strokeWidth:1.5, strokeUniform:true,
-      originX:'left', originY:'top' }),
+      fill:'white', ...sw, originX:'left', originY:'top' }),
   ];
-  positions.forEach(([cx, cy]) => {
-    objs.push(new fabric.Circle({
-      left: cx - br, top: cy - br, radius: br,
-      fill:'#555', stroke:'#222', strokeWidth:1, strokeUniform:true,
-      originX:'left', originY:'top',
-    }));
-    objs.push(new fabric.Circle({
-      left: cx - br*0.4, top: cy - br*0.4, radius: br*0.4,
-      fill:'#777', stroke:null,
-      originX:'left', originY:'top',
-    }));
+
+  centers.forEach(([cx, cy]) => {
+    // 外円
+    objs.push(new fabric.Circle({ left: cx-OR, top: cy-OR, radius: OR,
+      fill:'white', ...sw, originX:'left', originY:'top' }));
+    // 内円
+    objs.push(new fabric.Circle({ left: cx-IR, top: cy-IR, radius: IR,
+      fill:'white', ...sw, originX:'left', originY:'top' }));
+    // スポーク 4本（内円外縁→外円内側）
+    objs.push(new fabric.Path(
+      `M ${cx} ${cy-SO} L ${cx} ${cy-SI} ` +
+      `M ${cx} ${cy+SI} L ${cx} ${cy+SO} ` +
+      `M ${cx-SO} ${cy} L ${cx-SI} ${cy} ` +
+      `M ${cx+SI} ${cy} L ${cx+SO} ${cy}`,
+      { fill: 'transparent', ...sw, originX:'left', originY:'top' }
+    ));
+    // 中心ドット
+    objs.push(new fabric.Circle({ left: cx-1, top: cy-1, radius: 1,
+      fill:'#1a1a1a', stroke: null, strokeUniform: true, originX:'left', originY:'top' }));
   });
+
   makeFurnitureGroup(objs, x, y, 'stove', 'コンロ');
+}
+
+// キッチン (W=可変, H=60) — 流し台＋作業スペース＋コンロ4口
+// 幅変更時はグループ再生成するため、描画ロジックを分離
+function _buildKitchenObjs(W) {
+  const H  = GRID_SIZE * 3; // 高さ固定 60px
+  const OR = 9, IR = 4, SI = 4, SO = 7;
+  const sw = { stroke: '#1a1a1a', strokeWidth: 1.5, strokeUniform: true };
+
+  // コンロ枠は右端に固定（W-64 ～ W-8）、バーナーはその枠内から2px内側
+  const sfL = W - 64;
+  const burnerCenters = [
+    [sfL + 11, 20], [sfL + 45, 20],
+    [sfL + 11, 40], [sfL + 45, 40],
+  ];
+
+  const objs = [
+    new fabric.Rect({ left:0, top:0, width:W, height:H, rx:3,
+      fill:'white', ...sw, originX:'left', originY:'top' }),
+    // シンク槽
+    new fabric.Rect({ left:8, top:9, width:56, height:42, rx:4,
+      fill:'white', ...sw, originX:'left', originY:'top' }),
+    // 蛇口：ハンドルバー
+    new fabric.Rect({ left:22, top:12, width:28, height:4, rx:2,
+      fill:'white', ...sw, originX:'left', originY:'top' }),
+    // 蛇口：台座
+    new fabric.Rect({ left:33, top:10, width:6, height:8, rx:2,
+      fill:'white', ...sw, originX:'left', originY:'top' }),
+    // 蛇口：スパウト
+    new fabric.Rect({ left:34.5, top:17, width:3, height:12, rx:1.5,
+      fill:'white', ...sw, originX:'left', originY:'top' }),
+    // 排水口
+    new fabric.Circle({ left:36, top:40, radius:3,
+      fill:'white', ...sw, originX:'center', originY:'center' }),
+    // コンロ枠（右端固定、シンク槽と同サイズ）
+    new fabric.Rect({ left:sfL, top:9, width:56, height:42, rx:4,
+      fill:'white', ...sw, originX:'left', originY:'top' }),
+  ];
+
+  burnerCenters.forEach(([cx, cy]) => {
+    objs.push(new fabric.Circle({ left:cx-OR, top:cy-OR, radius:OR,
+      fill:'white', ...sw, originX:'left', originY:'top' }));
+    objs.push(new fabric.Circle({ left:cx-IR, top:cy-IR, radius:IR,
+      fill:'white', ...sw, originX:'left', originY:'top' }));
+    objs.push(new fabric.Path(
+      `M ${cx} ${cy-SO} L ${cx} ${cy-SI} ` +
+      `M ${cx} ${cy+SI} L ${cx} ${cy+SO} ` +
+      `M ${cx-SO} ${cy} L ${cx-SI} ${cy} ` +
+      `M ${cx+SI} ${cy} L ${cx+SO} ${cy}`,
+      { fill:'transparent', ...sw, originX:'left', originY:'top' }
+    ));
+    objs.push(new fabric.Circle({ left:cx-1, top:cy-1, radius:1,
+      fill:'#1a1a1a', stroke:null, strokeUniform:true, originX:'left', originY:'top' }));
+  });
+
+  return objs;
+}
+
+function _rebuildKitchen(obj, newW) {
+  const center   = obj.getCenterPoint();
+  const angle    = obj.angle;
+  const savedUid = obj._uid;
+  const savedData = { ...obj.data };
+
+  canvas.remove(obj);
+  const grp = new fabric.Group(_buildKitchenObjs(newW), {
+    left: center.x, top: center.y,
+    originX: 'center', originY: 'center',
+    angle,
+    subTargetCheck: false,
+    strokeUniform: true,
+    lockScalingFlip: true,
+    lockScalingY: true,
+    data: savedData,
+    _uid: savedUid,
+  });
+  canvas.add(grp);
+  canvas.setActiveObject(grp);
+  canvas.renderAll();
+}
+
+function addKitchen(x, y) {
+  const W = GRID_SIZE * 8;
+  makeFurnitureGroup(_buildKitchenObjs(W), x, y, 'kitchen', 'キッチン');
+  const grp = canvas.getActiveObject();
+  if (grp) grp.set({ lockScalingY: true });
+}
+
+// 台 (W=160, H=60) — 外枠のみ
+function addCounter(x, y) {
+  const W = GRID_SIZE * 8, H = GRID_SIZE * 3;
+  makeFurnitureGroup([
+    new fabric.Rect({ left:0, top:0, width:W, height:H, rx:3,
+      fill:'white', stroke:'#1a1a1a', strokeWidth:1.5, strokeUniform:true,
+      originX:'left', originY:'top' }),
+  ], x, y, 'counter', '台');
 }
 
 // -------------------------------------------------------
@@ -1346,7 +1588,10 @@ function _getDoorPath(pt1, pt2, mousePt) {
   };
 }
 
-// 折り戸（2枚）: V字形の2本線
+// 折り戸: 左右どちらかの半分に二等辺三角形を配置
+// - ドア方向のマウス位置が前半 → 左半分(pt1〜mid)に三角形
+// - ドア方向のマウス位置が後半 → 右半分(mid〜pt2)に三角形
+// - 垂直方向のマウス位置で三角形の向き(表/裏)を決定
 function _getBifoldPath(pt1, pt2, mousePt) {
   const dx = pt2.x - pt1.x, dy = pt2.y - pt1.y;
   const len = Math.hypot(dx, dy);
@@ -1354,17 +1599,34 @@ function _getBifoldPath(pt1, pt2, mousePt) {
   const d    = { x: dx / len, y: dy / len };
   const perp = { x: -d.y, y: d.x };
   const mid  = { x: (pt1.x + pt2.x) / 2, y: (pt1.y + pt2.y) / 2 };
-  const s    = (mousePt.x - mid.x) * perp.x + (mousePt.y - mid.y) * perp.y;
-  const n    = s >= 0 ? 1 : -1;
-  const depth = len * 0.3;
-  const fold = { x: mid.x + n * perp.x * depth, y: mid.y + n * perp.y * depth };
+
+  // 垂直方向: どちら側に頂点を出すか
+  const s = (mousePt.x - mid.x) * perp.x + (mousePt.y - mid.y) * perp.y;
+  const n = s >= 0 ? 1 : -1;
+
+  // 左右: ドア方向のマウス位置で三角形を置く半分を決定
+  const t = (mousePt.x - pt1.x) * d.x + (mousePt.y - pt1.y) * d.y;
+  const a = t < len / 2 ? pt1 : mid;
+  const b = t < len / 2 ? mid  : pt2;
+
+  // 二等辺三角形: 固定サイズ（横幅 GRID_SIZE、高さ WALL_WIDTH*4）
+  // マウスが前半 → pt1 に貼り付け、後半 → pt2 に貼り付け
+  const TRI_W = GRID_SIZE;       // ベース幅
+  const TRI_H = WALL_WIDTH * 4;  // 高さ
+  const anchor = t < len / 2 ? pt1 : pt2;
+  const dir    = t < len / 2 ? 1 : -1;  // pt1側は内向き(+d)、pt2側は内向き(-d)
+  const baseL  = anchor;
+  const baseR  = { x: anchor.x + d.x * dir * TRI_W, y: anchor.y + d.y * dir * TRI_W };
+  const baseMid = { x: (baseL.x + baseR.x) / 2, y: (baseL.y + baseR.y) / 2 };
+  const apex   = { x: baseMid.x + perp.x * n * TRI_H, y: baseMid.y + perp.y * n * TRI_H };
+
   return {
-    pathStr: `M ${pt1.x} ${pt1.y} L ${fold.x} ${fold.y} L ${pt2.x} ${pt2.y}`,
+    pathStr: `M ${baseL.x} ${baseL.y} L ${apex.x} ${apex.y} L ${baseR.x} ${baseR.y}`,
     len,
   };
 }
 
-// 2枚折り戸（4枚）: W字形の4本線
+// 2枚折り戸: 両端に同じ二等辺三角形を1つずつ配置（内側に向かって伸びる）
 function _getDoubleBifoldPath(pt1, pt2, mousePt) {
   const dx = pt2.x - pt1.x, dy = pt2.y - pt1.y;
   const len = Math.hypot(dx, dy);
@@ -1374,13 +1636,23 @@ function _getDoubleBifoldPath(pt1, pt2, mousePt) {
   const mid  = { x: (pt1.x + pt2.x) / 2, y: (pt1.y + pt2.y) / 2 };
   const s    = (mousePt.x - mid.x) * perp.x + (mousePt.y - mid.y) * perp.y;
   const n    = s >= 0 ? 1 : -1;
-  const depth = len * 0.15;
-  const q1  = { x: pt1.x + dx * 0.25, y: pt1.y + dy * 0.25 };
-  const q3  = { x: pt1.x + dx * 0.75, y: pt1.y + dy * 0.75 };
-  const f1  = { x: q1.x + n * perp.x * depth, y: q1.y + n * perp.y * depth };
-  const f2  = { x: q3.x + n * perp.x * depth, y: q3.y + n * perp.y * depth };
+
+  const TRI_W = GRID_SIZE;
+  const TRI_H = WALL_WIDTH * 4;
+
+  // 左三角形: pt1 に貼り付け、内側(+d)へ
+  const lR    = { x: pt1.x + d.x * TRI_W, y: pt1.y + d.y * TRI_W };
+  const lMid  = { x: (pt1.x + lR.x) / 2,  y: (pt1.y + lR.y) / 2  };
+  const lApex = { x: lMid.x + perp.x * n * TRI_H, y: lMid.y + perp.y * n * TRI_H };
+
+  // 右三角形: pt2 に貼り付け、内側(-d)へ
+  const rL    = { x: pt2.x - d.x * TRI_W, y: pt2.y - d.y * TRI_W };
+  const rMid  = { x: (rL.x + pt2.x) / 2,  y: (rL.y + pt2.y) / 2  };
+  const rApex = { x: rMid.x + perp.x * n * TRI_H, y: rMid.y + perp.y * n * TRI_H };
+
   return {
-    pathStr: `M ${pt1.x} ${pt1.y} L ${f1.x} ${f1.y} L ${mid.x} ${mid.y} L ${f2.x} ${f2.y} L ${pt2.x} ${pt2.y}`,
+    pathStr: `M ${pt1.x} ${pt1.y} L ${lApex.x} ${lApex.y} L ${lR.x} ${lR.y} ` +
+             `M ${rL.x} ${rL.y} L ${rApex.x} ${rApex.y} L ${pt2.x} ${pt2.y}`,
     len,
   };
 }
@@ -1603,12 +1875,14 @@ const modTool = {
   dots:     [],
   lines:    [],
   cursorLine: null,
+  snapHighlight: null,
 };
 
 function _modClearPreview() {
   modTool.dots.forEach(d => canvas.remove(d));  modTool.dots = [];
   modTool.lines.forEach(l => canvas.remove(l)); modTool.lines = [];
-  if (modTool.cursorLine) { canvas.remove(modTool.cursorLine); modTool.cursorLine = null; }
+  if (modTool.cursorLine)    { canvas.remove(modTool.cursorLine);    modTool.cursorLine = null; }
+  if (modTool.snapHighlight) { canvas.remove(modTool.snapHighlight); modTool.snapHighlight = null; }
 }
 
 function cancelModifyDraw() {
@@ -1648,6 +1922,73 @@ function _findEdgeOnRoom(rawPt, room) {
     const d  = Math.hypot(rawPt.x - c.x, rawPt.y - c.y);
     if (d < bestDist) { bestDist = d; best = { edgeIdx: i }; }
   }
+  return best;
+}
+
+// 辺上のグリッド整合点を列挙する
+// 角頂点は「その頂点を始点とする辺の t=0」として一意に割り当て（辺の終点 t=1 は除外）
+// 全座標を snap() でグリッドに丸める（Fabric内部の浮動小数点誤差を吸収）
+function _getEdgeSnapPoints(room) {
+  const verts = getRoomCanvasPoints(room);
+  const n = verts.length;
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const va = verts[i], vb = verts[(i + 1) % n];
+    const dx = vb.x - va.x, dy = vb.y - va.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 0.5) continue;
+
+    if (Math.abs(dy) < 1) {
+      // 水平辺: y をスナップし、x を GRID_SIZE 刻みで列挙
+      const sy  = snap(va.y);
+      const sxA = snap(va.x), sxB = snap(vb.x);
+      const step = dx > 0 ? GRID_SIZE : -GRID_SIZE;
+      // 始点を含め、終点は除外（終点は次の辺の始点として登録される）
+      for (let x = sxA; dx > 0 ? x < sxB - 0.5 : x > sxB + 0.5; x += step) {
+        pts.push({ x, y: sy, edgeIdx: i, t: (x - va.x) / dx });
+      }
+    } else if (Math.abs(dx) < 1) {
+      // 垂直辺: x をスナップし、y を GRID_SIZE 刻みで列挙
+      const sx  = snap(va.x);
+      const syA = snap(va.y), syB = snap(vb.y);
+      const step = dy > 0 ? GRID_SIZE : -GRID_SIZE;
+      for (let y = syA; dy > 0 ? y < syB - 0.5 : y > syB + 0.5; y += step) {
+        pts.push({ x: sx, y, edgeIdx: i, t: (y - va.y) / dy });
+      }
+    } else {
+      // 斜め辺: 始点のみ（グリッドスナップ）
+      pts.push({ x: snap(va.x), y: snap(va.y), edgeIdx: i, t: 0 });
+    }
+  }
+  return pts;
+}
+
+// 辺上グリッド点への最近接スナップ（単一部屋）
+function _snapToEdgeGridPoint(rawPt, room) {
+  const threshold = GRID_SIZE * 1.5 / canvas.getZoom();
+  const pts = _getEdgeSnapPoints(room);
+  let best = null, bestDist = threshold;
+  for (const p of pts) {
+    const d = Math.hypot(rawPt.x - p.x, rawPt.y - p.y);
+    if (d < bestDist) { bestDist = d; best = p; }
+  }
+  return best;
+}
+
+// 辺上グリッド点への最近接スナップ（全部屋対象）
+function _snapToAnyEdgeGridPoint(rawPt) {
+  const threshold = GRID_SIZE * 1.5 / canvas.getZoom();
+  let best = null, bestDist = threshold;
+  canvas.getObjects().forEach(obj => {
+    if (obj._isGrid || obj._isPreview) return;
+    if (obj.data?.type !== 'room') return;
+    if (obj.type !== 'rect' && obj.type !== 'polygon') return;
+    const pts = _getEdgeSnapPoints(obj);
+    for (const p of pts) {
+      const d = Math.hypot(rawPt.x - p.x, rawPt.y - p.y);
+      if (d < bestDist) { bestDist = d; best = { room: obj, ...p }; }
+    }
+  });
   return best;
 }
 
@@ -1705,28 +2046,25 @@ function _projectOntoEdge(rawPt, room, edgeIdx) {
 // マウスダウン処理
 function handleModifyDown(rawPt, type) {
   if (modTool.state === 0) {
-    const hit = _findEdgeOnAnyRoom(rawPt);
+    // 辺上グリッド点にスナップ（辺検出の曖昧さを排除）
+    const hit = _snapToAnyEdgeGridPoint(rawPt);
     if (!hit) return;
-    // 壁クリック: 辺上に投影してからグリッドスナップ
-    const _proj1 = _projectOntoEdge(rawPt, hit.room, hit.edgeIdx);
-    const pt1 = { x: snap(_proj1.x), y: snap(_proj1.y) };
     modTool.type  = type;
     modTool.room  = hit.room;
     modTool.edge1 = hit.edgeIdx;
-    modTool.pt1   = pt1;
+    modTool.pt1   = { x: hit.x, y: hit.y };
     modTool.freePts = [];
     modTool.state = 1;
-    _modAddDot(pt1);
+    _modAddDot(modTool.pt1);
     canvas.renderAll();
 
   } else if (modTool.state === 1) {
-    const hit = _findEdgeOnRoom(rawPt, modTool.room);
+    // 終点も辺上グリッド点にスナップ
+    const snapN = _snapToEdgeGridPoint(rawPt, modTool.room);
 
-    if (hit && modTool.freePts.length >= 1) {
-      // 終点壁クリック → 辺上に投影してグリッドスナップ後に確定
-      const _projN = _projectOntoEdge(rawPt, modTool.room, hit.edgeIdx);
-      const ptN = { x: snap(_projN.x), y: snap(_projN.y) };
-      const edgeN = hit.edgeIdx;
+    if (snapN && modTool.freePts.length >= 1) {
+      const ptN  = { x: snapN.x, y: snapN.y };
+      const edgeN = snapN.edgeIdx;
       const { room, pt1, edge1, freePts, type } = modTool;
       _modClearPreview();
       modTool.state = 0;
@@ -1756,6 +2094,8 @@ function handleModifyDown(rawPt, type) {
 // マウスムーブ処理
 function handleModifyMove(rawPt) {
   if (modTool.state !== 1) return;
+
+  // カーソルライン更新
   if (modTool.cursorLine) { canvas.remove(modTool.cursorLine); modTool.cursorLine = null; }
   const lastPt = modTool.freePts.length === 0 ? modTool.pt1 : modTool.freePts[modTool.freePts.length - 1];
   const pt = { x: snap(rawPt.x), y: snap(rawPt.y) };
@@ -1764,6 +2104,20 @@ function handleModifyMove(rawPt) {
     selectable: false, evented: false, _isPreview: true,
   });
   canvas.add(modTool.cursorLine);
+
+  // 辺上スナップ候補点をハイライト（終点選択のガイド）
+  if (modTool.snapHighlight) { canvas.remove(modTool.snapHighlight); modTool.snapHighlight = null; }
+  const sp = _snapToEdgeGridPoint(rawPt, modTool.room);
+  if (sp) {
+    modTool.snapHighlight = new fabric.Circle({
+      left: sp.x, top: sp.y, radius: 6,
+      originX: 'center', originY: 'center',
+      fill: 'rgba(217,119,6,0.25)', stroke: '#d97706', strokeWidth: 2,
+      selectable: false, evented: false, _isPreview: true,
+    });
+    canvas.add(modTool.snapHighlight);
+  }
+
   canvas.renderAll();
 }
 
@@ -1775,10 +2129,12 @@ function _applyRoomModification(room, pt1, edge1, freePts, ptN, edgeN) {
   const verts = getRoomCanvasPoints(room);
   const n = verts.length;
 
-  // pt1/ptN はグリッドスナップ済みで壁から微妙にずれている可能性があるため、
-  // ポリゴン構築前に辺上へ再投影して直線を保証する
-  let p1 = _projectOntoEdge(pt1, room, edge1);
-  let pN = _projectOntoEdge(ptN, room, edgeN);
+  // pt1/ptN は辺上グリッドスナップ点なのでグリッド座標を信頼する。
+  // 念のため辺上へ再投影するが、その後 snap() でグリッドに丸め直す。
+  let p1_raw = _projectOntoEdge(pt1, room, edge1);
+  let pN_raw = _projectOntoEdge(ptN, room, edgeN);
+  let p1 = { x: snap(p1_raw.x), y: snap(p1_raw.y) };
+  let pN = { x: snap(pN_raw.x), y: snap(pN_raw.y) };
   let fps = [...freePts];
   let e1 = edge1, eN = edgeN;
 
@@ -1807,16 +2163,22 @@ function _applyRoomModification(room, pt1, edge1, freePts, ptN, edgeN) {
     newVerts.push(verts[(eN + 1 + j) % n]);
   }
 
-  // 重複回避: p1 が v[e1] と同一なら省略
+  // 重複回避: p1 が v[e1] または保持アークの先頭頂点と同一なら省略
+  const firstKept = verts[(eN + 1) % n];
   const t1 = projectOntoSegment(p1, verts[e1], verts[(e1+1)%n]);
-  if (t1 > 0.005) newVerts.push(p1);
+  const p1_dup_first = Math.hypot(p1.x - firstKept.x, p1.y - firstKept.y) < 1;
+  if (t1 > 0.005 && !p1_dup_first) newVerts.push(p1);
   fps.forEach(p => newVerts.push(p));
-  // 重複回避: pN が v[(eN+1)%n] と同一なら省略
+  // 重複回避: pN が v[(eN+1)%n] または p1 と同一なら省略
   const tN = projectOntoSegment(pN, verts[eN], verts[(eN+1)%n]);
-  if (tN < 0.995) newVerts.push(pN);
+  const pN_dup_p1 = Math.hypot(pN.x - p1.x, pN.y - p1.y) < 1;
+  if (tN < 0.995 && !pN_dup_p1) newVerts.push(pN);
+
+  // 全頂点をグリッドに丸めて浮動小数点誤差を除去
+  const snappedVerts = newVerts.map(v => ({ x: snap(v.x), y: snap(v.y) }));
 
   // 新しいポリゴンを作成（プロパティを引き継ぐ）
-  const newRoom = new fabric.Polygon(newVerts, {
+  const newRoom = new fabric.Polygon(snappedVerts, {
     fill:            room.fill  || '#ffffff',
     stroke:          room.stroke || '#1a1a1a',
     strokeWidth:     room.strokeWidth || WALL_WIDTH,
@@ -1976,12 +2338,19 @@ function makeWindowObject(p1, p2) {
   // 内障子（内面から1px内側、中央-ov〜右端）
   const gInner = hLine((-ov + hl) / 2,  (H / 2 - 1.5), hl + ov);
 
-  return new fabric.Group([bg, wTop, wBot, gOuter, gInner], {
+  const grp = new fabric.Group([bg, wTop, wBot, gOuter, gInner], {
     left: cx, top: cy, angle,
     originX: 'center', originY: 'center',
     subTargetCheck: false, lockScalingFlip: true,
+    lockScalingY: true,
     data: { type: 'window' }, _uid: uid(),
   });
+  // 長さ方向（左右）のハンドルのみ表示、幅方向（上下・コーナー）は非表示
+  grp.setControlsVisibility({
+    mt: false, mb: false,
+    tl: false, tr: false, bl: false, br: false,
+  });
+  return grp;
 }
 
 function startWindowDraw(pt) {
@@ -2065,101 +2434,350 @@ function finishWindowDraw(pt) {
 }
 
 // -------------------------------------------------------
-// Stairs — click to place (rectangle + tread lines + UP/DN arrow)
+// Stairs — polyline draw tool (straight / L / U shape)
 // -------------------------------------------------------
-function buildStairsObjects(W, H, direction) {
-  const STEPS = 8;
-  const stepH = H / STEPS;
-  const cx    = W / 2;
-  const isUp  = direction === 'up';
+const STAIR_TREAD = Math.round(GRID_SIZE / 2);   // tread spacing (10px)
+
+// state: 0=idle, 1=first corner set (drawing width edge), 2=width confirmed (drawing centerline)
+const stairTool = {
+  active:      false,
+  state:       0,
+  widthCorner: null,   // first corner of the width edge (state 1)
+  pts:         [],     // centerline waypoints (state 2+)
+  width:       GRID_SIZE * 4,
+  direction:   'up',
+  guides:      [],
+};
+
+// Constrain pt to be horizontal or vertical from prev
+function _stairOrthoPt(prev, raw) {
+  const sx = snap(raw.x), sy = snap(raw.y);
+  const dx = Math.abs(sx - prev.x), dy = Math.abs(sy - prev.y);
+  return dx >= dy ? { x: sx, y: prev.y } : { x: prev.x, y: sy };
+}
+
+function _clearStairGuides() {
+  stairTool.guides.forEach(o => canvas.remove(o));
+  stairTool.guides = [];
+}
+
+// Normalize 2D vector
+function _normVec(ax, ay) {
+  const len = Math.hypot(ax, ay);
+  return len < 1e-9 ? { x: 1, y: 0 } : { x: ax / len, y: ay / len };
+}
+
+// Miter intersection: offset lines at a corner
+function _miterPt(P, dIn, dOut, sideSign, halfW) {
+  const n1 = { x: -dIn.y  * sideSign, y: dIn.x  * sideSign };
+  const n2 = { x: -dOut.y * sideSign, y: dOut.x * sideSign };
+  const ax = P.x + n1.x * halfW, ay = P.y + n1.y * halfW;
+  const bx = P.x + n2.x * halfW, by = P.y + n2.y * halfW;
+  const det = dIn.x * (-dOut.y) - dIn.y * (-dOut.x);
+  if (Math.abs(det) < 1e-9) return { x: ax, y: ay };
+  const t = ((bx - ax) * (-dOut.y) - (by - ay) * (-dOut.x)) / det;
+  return { x: ax + t * dIn.x, y: ay + t * dIn.y };
+}
+
+// Build stairs fabric.Group from waypoints
+function buildStairsFromPoints(pts, width, direction) {
+  if (!pts || pts.length < 2) return null;
+  const W2 = width / 2;
+  const N  = pts.length;
+
+  // Per-segment normalized direction vectors
+  const dirs = [];
+  for (let i = 0; i < N - 1; i++) {
+    dirs.push(_normVec(pts[i+1].x - pts[i].x, pts[i+1].y - pts[i].y));
+  }
+
+  // Build left/right edge polygon points using miter joins
+  const leftPts  = [];
+  const rightPts = [];
+
+  // Start cap
+  const nFirst = { x: -dirs[0].y, y: dirs[0].x };
+  leftPts.push ({ x: pts[0].x + nFirst.x * W2, y: pts[0].y + nFirst.y * W2 });
+  rightPts.push({ x: pts[0].x - nFirst.x * W2, y: pts[0].y - nFirst.y * W2 });
+
+  // Interior corners (miter joins)
+  for (let i = 1; i < N - 1; i++) {
+    leftPts.push (_miterPt(pts[i], dirs[i-1], dirs[i], +1, W2));
+    rightPts.push(_miterPt(pts[i], dirs[i-1], dirs[i], -1, W2));
+  }
+
+  // End cap
+  const nLast = { x: -dirs[N-2].y, y: dirs[N-2].x };
+  leftPts.push ({ x: pts[N-1].x + nLast.x * W2, y: pts[N-1].y + nLast.y * W2 });
+  rightPts.push({ x: pts[N-1].x - nLast.x * W2, y: pts[N-1].y - nLast.y * W2 });
+
+  // Full outline polygon (left fwd + right rev)
+  const polyPts = [...leftPts, ...rightPts.slice().reverse()];
+
+  // Compute bounding box for offsetting child objects
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  polyPts.forEach(p => {
+    if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
+  });
+  const offX = minX, offY = minY;
+  const rel  = p => ({ x: p.x - offX, y: p.y - offY });
+
+  const bboxW = maxX - minX, bboxH = maxY - minY;
+  const cx = bboxW / 2, cy = bboxH / 2;
   const objects = [];
 
-  // Outer border
-  objects.push(new fabric.Rect({
-    left: 0, top: 0, width: W, height: H,
-    fill: '#fafafa', stroke: '#1a1a1a', strokeWidth: 2,
-    strokeUniform: true, originX: 'left', originY: 'top',
+  // Outline: build as centered fabric.Path (same pattern as bathtub/toilet)
+  const relPolyPts = polyPts.map(rel);
+  const outlineStr = relPolyPts.reduce((acc, p, i) =>
+    acc + (i === 0 ? `M ${p.x - cx} ${p.y - cy}` : ` L ${p.x - cx} ${p.y - cy}`), '') + ' Z';
+  objects.push(new fabric.Path(outlineStr, {
+    left: cx, top: cy, originX: 'center', originY: 'center',
+    fill: '#fafafa', stroke: '#1a1a1a', strokeWidth: 2, strokeUniform: true,
   }));
 
-  // Tread lines
-  for (let i = 1; i < STEPS; i++) {
-    objects.push(new fabric.Line([0, i * stepH, W, i * stepH], {
-      stroke: '#1a1a1a', strokeWidth: 1.5, strokeUniform: true,
+  // Tread lines per segment
+  const relL = leftPts.map(rel);
+  const relR = rightPts.map(rel);
+
+  for (let i = 0; i < N - 1; i++) {
+    const segLen = Math.hypot(pts[i+1].x - pts[i].x, pts[i+1].y - pts[i].y);
+    const numTreads = Math.floor(segLen / STAIR_TREAD) - 1;
+    const lS = relL[i], lE = relL[i+1], rS = relR[i], rE = relR[i+1];
+    for (let j = 1; j <= numTreads; j++) {
+      const f  = j / (numTreads + 1);
+      const lx = lS.x + (lE.x - lS.x) * f, ly = lS.y + (lE.y - lS.y) * f;
+      const rx = rS.x + (rE.x - rS.x) * f, ry = rS.y + (rE.y - rS.y) * f;
+      objects.push(new fabric.Line([lx, ly, rx, ry], {
+        stroke: '#1a1a1a', strokeWidth: 1, strokeUniform: true,
+      }));
+    }
+  }
+
+  // Landing dashed line at interior corners
+  for (let i = 1; i < N - 1; i++) {
+    const lp = relL[i], rp = relR[i];
+    objects.push(new fabric.Line([lp.x, lp.y, rp.x, rp.y], {
+      stroke: '#1a1a1a', strokeWidth: 1.5, strokeDashArray: [4, 3], strokeUniform: true,
     }));
   }
 
-  // Arrow shaft + head as a single Path
-  const y1   = isUp ? H * 0.82 : H * 0.18; // shaft base
-  const y2   = isUp ? H * 0.22 : H * 0.78; // shaft tip
-  const yhd  = isUp ? H * 0.12 : H * 0.88; // arrowhead point
-  const yhb  = isUp ? H * 0.24 : H * 0.76; // arrowhead base
-  const aw   = 6;                            // arrowhead half-width
+  // Arrow + UP/DN label
+  // UP: pts[0] 側がグラウンドフロア → 矢印は pts[0]→pts[1] 方向
+  // DN: pts[1] 側がグラウンドフロア → 矢印は pts[1]→pts[0] 方向
+  const isUp    = direction === 'up';
+  const d0      = dirs[0];
+  const seg0Len = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+  const AW = 5, AH = 8;
+
+  // 矢印の進行方向（d0 または -d0）
+  const arrowDir = isUp ? d0 : { x: -d0.x, y: -d0.y };
+
+  // シャフト: グラウンドフロア端の 15% → 75%（先端方向）
+  const tBase = isUp ? 0.15 : 0.85;
+  const tTip  = isUp ? 0.75 : 0.25;
+  const tLbl  = isUp ? 0.08 : 0.92;
+
+  const shaftBase = rel({ x: pts[0].x + d0.x * seg0Len * tBase,
+                          y: pts[0].y + d0.y * seg0Len * tBase });
+  const shaftTip  = rel({ x: pts[0].x + d0.x * seg0Len * tTip,
+                          y: pts[0].y + d0.y * seg0Len * tTip });
+
+  // 矢頭: shaftTip から arrowDir 方向に AH px
+  const ahPerp = { x: -arrowDir.y, y: arrowDir.x };
+  const ahTip  = { x: shaftTip.x + arrowDir.x * AH, y: shaftTip.y + arrowDir.y * AH };
 
   objects.push(new fabric.Path(
-    `M ${cx} ${y1} L ${cx} ${y2} M ${cx - aw} ${yhb} L ${cx} ${yhd} L ${cx + aw} ${yhb}`,
+    `M ${shaftBase.x} ${shaftBase.y} L ${shaftTip.x} ${shaftTip.y} ` +
+    `M ${shaftTip.x - ahPerp.x * AW} ${shaftTip.y - ahPerp.y * AW} ` +
+    `L ${ahTip.x} ${ahTip.y} ` +
+    `L ${shaftTip.x + ahPerp.x * AW} ${shaftTip.y + ahPerp.y * AW}`,
     { stroke: '#1a1a1a', strokeWidth: 2, fill: 'transparent', strokeUniform: true }
   ));
 
-  // Label: "UP" or "DN"
-  const labelY = isUp ? H * 0.89 : H * 0.11;
+  const labelPt = rel({ x: pts[0].x + d0.x * seg0Len * tLbl,
+                        y: pts[0].y + d0.y * seg0Len * tLbl });
   objects.push(new fabric.Text(isUp ? 'UP' : 'DN', {
-    left: cx, top: labelY,
+    left: labelPt.x, top: labelPt.y,
     originX: 'center', originY: 'center',
     fontSize: 10, fontFamily: 'Inter, sans-serif',
     fill: '#1a1a1a', fontWeight: '600',
   }));
 
-  return objects;
-}
-
-function addStairs(x, y, direction = 'up') {
-  const W = GRID_SIZE * 5;  // 100px
-  const H = GRID_SIZE * 8;  // 160px
-  const id = uid();
-
-  const grp = new fabric.Group(buildStairsObjects(W, H, direction), {
-    left: x, top: y,
-    data: { type: 'stairs', direction, W, H },
-    _uid: id,
+  return new fabric.Group(objects, {
+    left: offX, top: offY,
+    originX: 'left', originY: 'top',
+    data: { type: 'stairs', direction, pts: pts.map(p => ({ x: p.x, y: p.y })), width },
+    _uid: uid(),
     subTargetCheck: false,
     strokeUniform: true, lockScalingFlip: true,
   });
+}
+
+// Phase 1: place first corner of width edge
+function startStairDraw(pt) {
+  stairTool.active      = true;
+  stairTool.state       = 1;
+  stairTool.widthCorner = { x: snap(pt.x), y: snap(pt.y) };
+  stairTool.pts         = [];
+  stairTool.direction   = 'up';
+  _clearStairGuides();
+  canvas.add(new fabric.Circle({
+    left: stairTool.widthCorner.x, top: stairTool.widthCorner.y,
+    originX: 'center', originY: 'center',
+    radius: 4, fill: '#3b82f6', stroke: 'none',
+    evented: false, selectable: false, _isPreview: true,
+  }));
+  canvas.renderAll();
+}
+
+// Phase 1 preview: show width-edge line from first corner to mouse
+function _updateWidthEdgePreview(mousePt) {
+  _clearStairGuides();
+  if (!stairTool.widthCorner) return;
+
+  const c0  = stairTool.widthCorner;
+  const c1  = _stairOrthoPt(c0, mousePt);
+  const w   = Math.hypot(c1.x - c0.x, c1.y - c0.y);
+  const mid = { x: (c0.x + c1.x) / 2, y: (c0.y + c1.y) / 2 };
+
+  // Dashed line for the width edge
+  const line = new fabric.Line([c0.x, c0.y, c1.x, c1.y], {
+    stroke: '#3b82f6', strokeWidth: 2, strokeDashArray: [5, 4],
+    evented: false, selectable: false,
+  });
+  canvas.add(line);
+  stairTool.guides.push(line);
+
+  // Dimension label (px → mm: GRID_SIZE px = 455 mm)
+  const mm   = Math.round(w / GRID_SIZE * 455);
+  const perp = c1.x === c0.x ? { x: 1, y: 0 } : { x: 0, y: -1 };
+  const lbl  = new fabric.Text(`${mm} mm`, {
+    left: mid.x + perp.x * 16, top: mid.y + perp.y * 16,
+    originX: 'center', originY: 'center',
+    fontSize: 11, fontFamily: 'Inter, sans-serif',
+    fill: '#3b82f6', fontWeight: '600',
+    evented: false, selectable: false,
+  });
+  canvas.add(lbl);
+  stairTool.guides.push(lbl);
+  canvas.renderAll();
+}
+
+// Phase 1 → 2: second corner confirms width, converts to centerline mode
+function _confirmWidthEdge(pt) {
+  const c0 = stairTool.widthCorner;
+  const c1 = _stairOrthoPt(c0, pt);
+  const w  = snap(Math.hypot(c1.x - c0.x, c1.y - c0.y));
+  if (w < GRID_SIZE * 2) return;   // too short — ignore
+
+  stairTool.width = w;
+  // Centerline starts at the midpoint of the width edge
+  const center = { x: (c0.x + c1.x) / 2, y: (c0.y + c1.y) / 2 };
+  stairTool.pts   = [center];
+  stairTool.state = 2;
+
+  // Remove start dot; it will be re-drawn at the center point
+  canvas.getObjects().filter(o => o._isPreview).forEach(o => canvas.remove(o));
+  canvas.add(new fabric.Circle({
+    left: center.x, top: center.y,
+    originX: 'center', originY: 'center',
+    radius: 4, fill: '#3b82f6', stroke: 'none',
+    evented: false, selectable: false, _isPreview: true,
+  }));
+  canvas.renderAll();
+}
+
+// Phase 2 preview: live staircase ghost
+function _updateStairPreview(mousePt) {
+  _clearStairGuides();
+  if (stairTool.state !== 2 || stairTool.pts.length === 0) return;
+
+  const constrained = _stairOrthoPt(stairTool.pts[stairTool.pts.length - 1], mousePt);
+  const previewPts  = [...stairTool.pts, constrained];
+  if (previewPts.length < 2) return;
+
+  const grp = buildStairsFromPoints(previewPts, stairTool.width, stairTool.direction);
+  if (!grp) return;
+  grp.set({ opacity: 0.55, evented: false, selectable: false });
+  canvas.add(grp);
+  stairTool.guides.push(grp);
+  canvas.renderAll();
+}
+
+// Phase 2+: add a centerline waypoint
+function addStairWaypoint(pt) {
+  if (stairTool.state !== 2 || stairTool.pts.length === 0) return;
+  const prev    = stairTool.pts[stairTool.pts.length - 1];
+  const snapped = _stairOrthoPt(prev, pt);
+  if (snapped.x === prev.x && snapped.y === prev.y) return;
+  stairTool.pts.push(snapped);
+}
+
+function finishStairDraw() {
+  if (!stairTool.active) return;
+  _clearStairGuides();
+  canvas.getObjects().filter(o => o._isPreview).forEach(o => canvas.remove(o));
+  stairTool.active = false;
+  stairTool.state  = 0;
+
+  const p = stairTool.pts;
+  stairTool.pts = []; stairTool.widthCorner = null;
+
+  if (p.length < 2) { canvas.renderAll(); setTool('select'); return; }
+
+  const grp = buildStairsFromPoints(p, stairTool.width, stairTool.direction);
+  if (!grp) { canvas.renderAll(); setTool('select'); return; }
+
   canvas.add(grp);
   canvas.setActiveObject(grp);
   updateObjectCount();
   canvas.renderAll();
   saveHistory();
+  setTool('select');
+}
+
+function cancelStairDraw() {
+  _clearStairGuides();
+  canvas.getObjects().filter(o => o._isPreview).forEach(o => canvas.remove(o));
+  stairTool.active      = false;
+  stairTool.state       = 0;
+  stairTool.pts         = [];
+  stairTool.widthCorner = null;
+  canvas.renderAll();
+}
+
+// Legacy helper used by placeFloorPlanObjects (AI import)
+function addStairs(x, y, direction = 'up') {
+  const W = GRID_SIZE * 5;
+  const H = GRID_SIZE * 8;
+  const pts = [{ x: x + W / 2, y }, { x: x + W / 2, y: y + H }];
+  const grp = buildStairsFromPoints(pts, W, direction);
+  if (!grp) return null;
+  // Override left/top so top-left is at (x, y)
+  grp.set({ left: x, top: y });
+  canvas.add(grp);
+  canvas.setActiveObject(grp);
+  updateObjectCount();
+  canvas.renderAll();
   return grp;
 }
 
-// UP ↔ DN 切替：グループを同位置に再生成
-// sourceObj: 対象オブジェクト（省略時はアクティブオブジェクト）
-// overrideAngle: 再生成後に設定する角度（省略時は元の角度をそのまま使用）
-function flipStairsDirection(sourceObj, overrideAngle) {
+// UP ↔ DN 切替：グループ内の Text オブジェクトのテキストだけ差し替え
+function flipStairsDirection(sourceObj) {
   const obj = sourceObj || canvas.getActiveObject();
   if (!obj || obj.data?.type !== 'stairs') return;
 
-  const dir   = obj.data.direction === 'up' ? 'dn' : 'up';
-  const W     = obj.data.W || GRID_SIZE * 5;
-  const H     = obj.data.H || GRID_SIZE * 8;
-  const angle = overrideAngle !== undefined ? overrideAngle : obj.angle;
+  const dir = obj.data.direction === 'up' ? 'dn' : 'up';
+  obj.data.direction = dir;
 
-  const newGrp = new fabric.Group(buildStairsObjects(W, H, dir), {
-    left:    obj.left,
-    top:     obj.top,
-    angle,
-    scaleX:  obj.scaleX,
-    scaleY:  obj.scaleY,
-    data: { type: 'stairs', direction: dir, W, H },
-    _uid: uid(),
-    subTargetCheck: false,
-    strokeUniform: true, lockScalingFlip: true,
-  });
+  // グループ内の fabric.Text を探してテキストを更新
+  const textObj = obj.getObjects?.().find(o => o.type === 'text' || o.type === 'i-text');
+  if (textObj) {
+    textObj.set({ text: dir === 'up' ? 'UP' : 'DN' });
+    obj.dirty = true;
+  }
 
-  canvas.remove(obj);
-  canvas.add(newGrp);
-  canvas.setActiveObject(newGrp);
-  updateObjectCount();
   canvas.renderAll();
   updatePropsPanel();
   saveHistory();
@@ -2171,6 +2789,7 @@ function flipStairsDirection(sourceObj, overrideAngle) {
 canvas.on('mouse:down', (e) => {
   // 右クリック → 配置中のツールをキャンセルして選択ツールへ
   if (e.e.button === 2) {
+    if (stairTool.active)    { cancelStairDraw();  setTool('select'); return; }
     if (doorTool.state > 0)  { cancelDoorDraw();   setTool('select'); return; }
     if (poly.active)         { cancelPolyDraw();   setTool('select'); return; }
     if (modTool.room)        { cancelModifyDraw(); setTool('select'); return; }
@@ -2209,8 +2828,14 @@ canvas.on('mouse:down', (e) => {
       startWindowDraw(canvas.getPointer(e.e));  // スナップなし：壁への投影で位置決め
       break;
     case 'stairs':
-      if (!e.target) addStairs(pt.x, pt.y);
-      setTool('select');
+      if (stairTool.state === 0) {
+        startStairDraw(pt);                     // 1クリック目：幅辺の起点
+      } else if (stairTool.state === 1) {
+        _confirmWidthEdge(pt);                  // 2クリック目：幅辺の終点 → 幅確定
+      } else if (stairTool.state === 2) {
+        addStairWaypoint(pt);                   // 3クリック目：長さ方向の端点 → 即配置
+        finishStairDraw();
+      }
       break;
     case 'text':
       if (!e.target) addTextAt(pt);
@@ -2231,6 +2856,8 @@ canvas.on('mouse:down', (e) => {
     case 'refrigerator':if (!e.target) addRefrigerator(pt.x, pt.y);setTool('select'); break;
     case 'washer':      if (!e.target) addWasher(pt.x, pt.y);      setTool('select'); break;
     case 'stove':       if (!e.target) addStove(pt.x, pt.y);       setTool('select'); break;
+    case 'kitchen':     if (!e.target) addKitchen(pt.x, pt.y);     setTool('select'); break;
+    case 'counter':     if (!e.target) addCounter(pt.x, pt.y);     setTool('select'); break;
   }
 });
 
@@ -2244,6 +2871,10 @@ canvas.on('mouse:move', (e) => {
   if (currentTool === 'door')     handleDoorMove(canvas.getPointer(e.e));
   if (currentTool === 'window')   updateWindowDraw(canvas.getPointer(e.e));
   if (currentTool === 'poly')     updatePolyGuide(pt);
+  if (currentTool === 'stairs' && stairTool.active) {
+    if (stairTool.state === 1) _updateWidthEdgePreview(pt);
+    else if (stairTool.state === 2) _updateStairPreview(pt);
+  }
 });
 
 canvas.on('mouse:up', (e) => {
@@ -2379,7 +3010,7 @@ const TYPE_LABELS = {
   window: '窓', stairs: '階段', text: 'テキスト',
   'room-label': 'ラベル',
   toilet: 'トイレ', bathtub: 'バスタブ', sink: '流し台',
-  refrigerator: '冷蔵庫', washer: '洗濯機', stove: 'コンロ',
+  refrigerator: '冷蔵庫', washer: '洗濯機', stove: 'コンロ', kitchen: 'キッチン', counter: '台',
 };
 
 canvas.on('selection:created', updatePropsPanel);
@@ -2431,6 +3062,12 @@ function updatePropsPanel() {
       dir === 'up' ? 'UP ↑（クリックで DN に切替）' : 'DN ↓（クリックで UP に切替）';
   }
 
+  // 階段は ↺↻↔↕ の4ボタンを非表示、水平・垂直に戻すのみ表示
+  const rotBtns = ['btn-rotate-ccw','btn-rotate-cw','btn-flip-h','btn-flip-v'];
+  rotBtns.forEach(id => {
+    document.getElementById(id).style.display = isStairs ? 'none' : '';
+  });
+
   // Per-object snap toggle
   const snapDisabled = obj.data?.snapDisabled || false;
   const $snapToggle = document.getElementById('prop-snap-toggle');
@@ -2438,14 +3075,27 @@ function updatePropsPanel() {
   $snapToggle.checked    = !snapDisabled;
   $snapLabel.textContent = snapDisabled ? 'OFF' : 'ON';
 
-  // Swatches
-  syncFillSwatches(obj.fill);
-  syncStrokeSwatches(obj.stroke);
+  // 壁は塗りつぶしなし（Line に fill は不要）
+  document.getElementById('prop-fill-group').style.display = objType === 'wall' ? 'none' : '';
+
+  // Swatches（階段グループは子オブジェクトから色を読み取る）
+  const _swatchFill   = obj.data?.type === 'stairs'
+    ? (obj.getObjects?.().find(c => c.fill && c.fill !== 'transparent')?.fill ?? '#fafafa')
+    : obj.fill;
+  const _swatchStroke = obj.data?.type === 'stairs'
+    ? (obj.getObjects?.().find(c => c.stroke)?.stroke ?? '#1a1a1a')
+    : obj.stroke;
+  syncFillSwatches(_swatchFill);
+  syncStrokeSwatches(_swatchStroke);
 }
 
 function clearPropsPanel() {
   $propsEmpty.style.display   = 'block';
   $propsContent.style.display = 'none';
+  // 階段選択時に隠したボタンを元に戻す
+  ['btn-rotate-ccw','btn-rotate-cw','btn-flip-h','btn-flip-v'].forEach(id => {
+    document.getElementById(id).style.display = '';
+  });
 }
 
 // Returns the room rect whether the selection is the rect itself or its label
@@ -2616,7 +3266,17 @@ document.getElementById('fill-cpick-dropdown').addEventListener('click', (e) => 
   document.getElementById('fill-cpick-dropdown').classList.remove('open');
   const obj = canvas.getActiveObject();
   if (!obj) return;
-  obj.set({ fill: sw.dataset.color });
+  if (obj.data?.type === 'stairs') {
+    // 塗りつぶし色：外形パス（Text 以外で fill が transparent でない子）のみ更新
+    obj.getObjects().forEach(c => {
+      if (c.type !== 'text' && c.type !== 'i-text' && c.fill && c.fill !== 'transparent') {
+        c.set({ fill: sw.dataset.color });
+      }
+    });
+    obj.dirty = true;
+  } else {
+    obj.set({ fill: sw.dataset.color });
+  }
   canvas.renderAll();
   canvas.fire('object:modified', { target: obj });
 });
@@ -2631,7 +3291,16 @@ document.getElementById('stroke-cpick-dropdown').addEventListener('click', (e) =
   document.getElementById('stroke-cpick-dropdown').classList.remove('open');
   const obj = canvas.getActiveObject();
   if (!obj) return;
-  obj.set({ stroke: sw.dataset.color });
+  if (obj.data?.type === 'stairs') {
+    // 枠色：stroke を持つ子（外形・踏板・矢印）と Text の fill を一括更新
+    obj.getObjects().forEach(c => {
+      if (c.stroke) c.set({ stroke: sw.dataset.color });
+      if (c.type === 'text' || c.type === 'i-text') c.set({ fill: sw.dataset.color });
+    });
+    obj.dirty = true;
+  } else {
+    obj.set({ stroke: sw.dataset.color });
+  }
   canvas.renderAll();
   canvas.fire('object:modified', { target: obj });
 });
@@ -2714,13 +3383,13 @@ document.addEventListener('keydown', (e) => {
 
   if (k === 'delete' || k === 'backspace') { deleteSelected(); return; }
   if (k === 'escape') {
+    if (stairTool.active) cancelStairDraw();
     setTool('select');
     canvas.discardActiveObject();
     canvas.renderAll();
   }
-  if (k === 'enter' && currentTool === 'poly' && poly.active) {
-    e.preventDefault();
-    closePolygon();
+  if (k === 'enter') {
+    if (currentTool === 'poly' && poly.active) { e.preventDefault(); closePolygon(); }
   }
 });
 
@@ -2943,22 +3612,25 @@ function showToast(message, type = 'success', duration = 2500) {
 }
 
 // ----- Welcome overlay -----
+let _welcomeDismissed = false;
+
 function updateWelcomeOverlay(n) {
   const el = document.getElementById('welcome-overlay');
   if (!el) return;
-  if (n === 0) {
-    el.classList.remove('hidden');
-  } else {
+  if (n > 0) {
+    _welcomeDismissed = true;
     el.classList.add('hidden');
   }
 }
 
 document.getElementById('welcome-btn-template').addEventListener('click', () => {
+  _welcomeDismissed = true;
   document.getElementById('welcome-overlay').classList.add('hidden');
   document.getElementById('btn-template').click();
 });
 
 document.getElementById('welcome-btn-dismiss').addEventListener('click', () => {
+  _welcomeDismissed = true;
   document.getElementById('welcome-overlay').classList.add('hidden');
 });
 

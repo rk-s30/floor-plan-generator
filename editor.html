@@ -388,6 +388,25 @@
             </svg>
             <span class="tool-lbl">コンロ</span>
           </button>
+          <button class="tool-btn furniture-item" data-tool="counter" data-tip="台">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="7" width="20" height="10" rx="2"/>
+            </svg>
+            <span class="tool-lbl">台</span>
+          </button>
+          <button class="tool-btn furniture-item" data-tool="kitchen" data-tip="キッチン">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="1" y="6" width="22" height="12" rx="2"/>
+              <rect x="3" y="8" width="8" height="8" rx="1"/>
+              <circle cx="16" cy="10" r="2"/>
+              <circle cx="21" cy="10" r="2"/>
+              <circle cx="16" cy="14" r="2"/>
+              <circle cx="21" cy="14" r="2"/>
+            </svg>
+            <span class="tool-lbl">キッチン</span>
+          </button>
         </div>
       </div>
     </div>
@@ -557,19 +576,16 @@
           <label class="prop-label">回転 (°)</label>
           <div style="display:flex;gap:4px;align-items:center;">
             <button class="btn btn-ghost" id="btn-rotate-ccw"
-                    title="90° 反時計回り ( [ )"
                     style="padding:4px 7px;font-size:13px;border:1px solid var(--border);">↺</button>
             <button class="btn btn-ghost" id="btn-rotate-cw"
-                    title="90° 時計回り ( ] )"
                     style="padding:4px 7px;font-size:13px;border:1px solid var(--border);">↻</button>
-            <button class="btn btn-ghost" id="btn-flip-h" title="左右反転"
+            <button class="btn btn-ghost" id="btn-flip-h"
                     style="padding:4px 7px;font-size:11px;border:1px solid var(--border);">↔</button>
-            <button class="btn btn-ghost" id="btn-flip-v" title="上下反転"
+            <button class="btn btn-ghost" id="btn-flip-v"
                     style="padding:4px 7px;font-size:11px;border:1px solid var(--border);">↕</button>
           </div>
           <!-- 水平/垂直への正規化 -->
           <button class="btn btn-ghost" id="btn-snap-angle"
-                  title="水平・垂直に戻す (0)"
                   style="margin-top:5px;width:100%;justify-content:center;
                          border:1px solid var(--border);font-size:11px;gap:5px;">
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
@@ -581,7 +597,7 @@
           </button>
         </div>
 
-        <div class="prop-group">
+        <div class="prop-group" id="prop-fill-group">
           <label class="prop-label">塗りつぶし</label>
           <div class="cpick-wrap" id="fill-cpick-wrap">
             <button class="cpick-trigger" id="fill-cpick-trigger">
@@ -628,7 +644,7 @@
         <!-- Per-object snap toggle -->
         <div class="prop-group" style="border-top:1px solid var(--border);padding-top:10px;margin-top:2px;">
           <label class="prop-label">スナップ</label>
-          <label class="toggle-row" title="このオブジェクトのグリッドスナップを個別にON/OFFできます">
+          <label class="toggle-row">
             <input type="checkbox" id="prop-snap-toggle" checked>
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
             <span class="toggle-label" id="prop-snap-label">ON</span>
