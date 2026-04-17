@@ -151,7 +151,7 @@ updateObjectCount();
 function snap(v) { return Math.round(v / GRID_SIZE) * GRID_SIZE; }
 
 // 壁・部屋を描画するツール群 — グローバルスナップOFFでも常にグリッドスナップ
-const WALL_SNAP_TOOLS = new Set(['room', 'cl-room', 'wet-room', 'wall', 'poly', 'indent', 'protrude']);
+const WALL_SNAP_TOOLS = new Set(['room', 'cl-room', 'wet-room', 'wall', 'poly', 'indent', 'protrude', 'line']);
 
 function getPointer(e) {
   const pt = canvas.getPointer(e.e);
@@ -250,6 +250,7 @@ const TOOL_LABELS = {
   select: '選択', room: '部屋', poly: '多角形',
   indent: '削る', protrude: '出す',
   wall: '壁', door: 'ドア', window: '窓', stairs: '階段', text: 'テキスト',
+  line: '線',
   toilet: 'トイレ', bathtub: 'バスタブ', sink: '流し台',
   refrigerator: '冷蔵庫', washer: '洗濯機', stove: 'コンロ', kitchen: 'キッチン', counter: '台',
 };
@@ -261,6 +262,7 @@ function setTool(name) {
   cancelPolyDraw();
   cancelModifyDraw();
   cancelDoorDraw();
+  cancelLineDraw();
   if (stairTool.active) cancelStairDraw();
 
   currentTool = name;
@@ -275,6 +277,8 @@ function setTool(name) {
   if (btnFurnitureOpen) btnFurnitureOpen.classList.toggle('active', FURNITURE_TOOLS.has(name));
   const btnDoorOpen = document.getElementById('tool-door-open');
   if (btnDoorOpen) btnDoorOpen.classList.toggle('active', name === 'door');
+  const btnLineOpen = document.getElementById('tool-line-open');
+  if (btnLineOpen) btnLineOpen.classList.toggle('active', name === 'line');
 
   const isSelect = name === 'select';
   canvas.isDrawingMode = false;
@@ -318,6 +322,7 @@ function setTool(name) {
     stove:      'クリックで配置 / [ ] で回転',
     kitchen:    'クリックで配置 / [ ] で回転',
     counter:    'クリックで配置 / [ ] で回転',
+    line:       'クリックで始点を指定 → 終点をクリックで線を描く / Esc でキャンセル',
   };
   const hint    = TOOL_HINTS[name] || '';
   const $hint   = document.getElementById('status-hint');
@@ -332,7 +337,7 @@ document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
 });
 
 // パネル共通：固定位置で表示、他パネルをすべて閉じる
-const ALL_PANELS = ['room-panel', 'furniture-panel', 'door-panel'];
+const ALL_PANELS = ['room-panel', 'furniture-panel', 'door-panel', 'line-panel'];
 function _openPanel(panel, triggerBtn) {
   ALL_PANELS.forEach(id => {
     const el = document.getElementById(id);
@@ -420,6 +425,28 @@ function _openPanel(panel, triggerBtn) {
   document.addEventListener('click', () => { panel.style.display = 'none'; });
 })();
 
+// 線パネルの開閉
+(function () {
+  const panel   = document.getElementById('line-panel');
+  const btnOpen = document.getElementById('tool-line-open');
+
+  btnOpen.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _openPanel(panel, btnOpen);
+  });
+
+  panel.querySelectorAll('.furniture-item[data-tool]').forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      panel.style.display = 'none';
+      if (item.dataset.lineSubtype) lineSubtype = item.dataset.lineSubtype;
+      setTool(item.dataset.tool);
+    });
+  });
+
+  document.addEventListener('click', () => { panel.style.display = 'none'; });
+})();
+
 // -------------------------------------------------------
 // Room — drag to draw
 // -------------------------------------------------------
@@ -497,6 +524,7 @@ function finishRoomDraw(pt) {
   const label = currentTool === 'cl-room' ? 'CL' : '部屋';
   addRoom(x, y, w, h, label);
   saveHistory();
+  setTool('select');
 }
 
 // -------------------------------------------------------
@@ -1146,6 +1174,160 @@ function cancelWall() {
 }
 
 // -------------------------------------------------------
+// Line drawing tool — 2-click: start → end
+// -------------------------------------------------------
+let lineSubtype = 'solid'; // 'solid' | 'dashed' | 'dotted' | 'arrow' | 'arrow-both' | 'double'
+const LINE_WIDTH = WALL_WIDTH / 2; // 3px
+const LINE_COLOR = '#1a1a1a';
+
+const lineTool = {
+  active:   false,
+  startPt:  null,
+  preview:  null,   // preview objects array
+};
+
+function _buildLinePreviewPath(x1, y1, x2, y2) {
+  return `M ${x1} ${y1} L ${x2} ${y2}`;
+}
+
+function _buildArrowPathStr(x1, y1, x2, y2, bothEnds) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len = Math.hypot(dx, dy);
+  if (len < 1) return `M ${x1} ${y1} L ${x2} ${y2}`;
+  const nx = dx / len, ny = dy / len;
+  const px = -ny, py = nx;
+  const arrowSize = 10;
+  const halfW = arrowSize * 0.45;
+
+  // Arrow at pt2
+  const h2x = x2 - nx * arrowSize, h2y = y2 - ny * arrowSize;
+  const l2x = h2x + px * halfW, l2y = h2y + py * halfW;
+  const r2x = h2x - px * halfW, r2y = h2y - py * halfW;
+  let path = `M ${x1} ${y1} L ${x2} ${y2} M ${l2x} ${l2y} L ${x2} ${y2} L ${r2x} ${r2y}`;
+
+  if (bothEnds) {
+    const h1x = x1 + nx * arrowSize, h1y = y1 + ny * arrowSize;
+    const l1x = h1x + px * halfW, l1y = h1y + py * halfW;
+    const r1x = h1x - px * halfW, r1y = h1y - py * halfW;
+    path += ` M ${l1x} ${l1y} L ${x1} ${y1} L ${r1x} ${r1y}`;
+  }
+
+  return path;
+}
+
+function _getLineDashArray(subtype) {
+  if (subtype === 'dashed') return [10, 5];
+  if (subtype === 'dotted') return [2, 6];
+  return null;
+}
+
+function startLineDraw(pt) {
+  lineTool.startPt = pt;
+  // Preview: simple dashed line indicating start point
+  const dot = new fabric.Circle({
+    left: pt.x, top: pt.y, radius: 4,
+    originX: 'center', originY: 'center',
+    fill: '#f97316', stroke: '#fff', strokeWidth: 1.5,
+    selectable: false, evented: false, _isPreview: true,
+  });
+  const previewLine = new fabric.Line([pt.x, pt.y, pt.x, pt.y], {
+    stroke: LINE_COLOR, strokeWidth: LINE_WIDTH,
+    strokeDashArray: [6, 4],
+    selectable: false, evented: false, _isPreview: true,
+  });
+  canvas.add(dot);
+  canvas.add(previewLine);
+  lineTool.preview = [dot, previewLine];
+  lineTool.active  = true;
+}
+
+function updateLineDraw(pt) {
+  if (!lineTool.active || !lineTool.preview) return;
+  const previewLine = lineTool.preview[1];
+  previewLine.set({ x2: pt.x, y2: pt.y });
+  canvas.renderAll();
+}
+
+function finishLineDraw(pt) {
+  if (!lineTool.active) return;
+  const x1 = lineTool.startPt.x, y1 = lineTool.startPt.y;
+  const x2 = pt.x, y2 = pt.y;
+
+  // Remove preview objects
+  lineTool.preview.forEach(obj => canvas.remove(obj));
+  lineTool.active  = false;
+  lineTool.preview = null;
+  lineTool.startPt = null;
+
+  if (Math.hypot(x2 - x1, y2 - y1) < GRID_SIZE) return;
+
+  let lineObj;
+  if (lineSubtype === 'arrow' || lineSubtype === 'arrow-both') {
+    const pathStr = _buildArrowPathStr(x1, y1, x2, y2, lineSubtype === 'arrow-both');
+    lineObj = new fabric.Path(pathStr, {
+      stroke: LINE_COLOR, strokeWidth: LINE_WIDTH,
+      fill: 'transparent',
+      strokeLineCap: 'round', strokeLineJoin: 'round',
+      strokeUniform: true,
+      selectable: true, evented: true,
+      hasControls: true,
+      data: { type: 'annotation-line', subtype: lineSubtype },
+      _uid: uid(),
+    });
+  } else if (lineSubtype === 'double') {
+    // Two parallel lines — build as a group
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+    const px = -(dy / len) * 3, py = (dx / len) * 3;
+    const l1 = new fabric.Line([x1 + px, y1 + py, x2 + px, y2 + py], {
+      stroke: LINE_COLOR, strokeWidth: LINE_WIDTH,
+      strokeLineCap: 'round', strokeUniform: true,
+      selectable: false, evented: false,
+    });
+    const l2 = new fabric.Line([x1 - px, y1 - py, x2 - px, y2 - py], {
+      stroke: LINE_COLOR, strokeWidth: LINE_WIDTH,
+      strokeLineCap: 'round', strokeUniform: true,
+      selectable: false, evented: false,
+    });
+    lineObj = new fabric.Group([l1, l2], {
+      selectable: true, evented: true,
+      hasControls: true,
+      data: { type: 'annotation-line', subtype: 'double' },
+      _uid: uid(),
+    });
+  } else {
+    // solid / dashed / dotted
+    const dashArray = _getLineDashArray(lineSubtype);
+    lineObj = new fabric.Line([x1, y1, x2, y2], {
+      stroke: LINE_COLOR, strokeWidth: LINE_WIDTH,
+      strokeLineCap: 'round',
+      strokeUniform: true,
+      ...(dashArray ? { strokeDashArray: dashArray } : {}),
+      selectable: true, evented: true,
+      hasControls: true,
+      data: { type: 'annotation-line', subtype: lineSubtype },
+      _uid: uid(),
+    });
+  }
+
+  canvas.add(lineObj);
+  canvas.setActiveObject(lineObj);
+  updateObjectCount();
+  canvas.renderAll();
+  saveHistory();
+}
+
+function cancelLineDraw() {
+  if (lineTool.preview) {
+    lineTool.preview.forEach(obj => canvas.remove(obj));
+    canvas.renderAll();
+  }
+  lineTool.active  = false;
+  lineTool.preview = null;
+  lineTool.startPt = null;
+}
+
+// -------------------------------------------------------
 // Polygon room tool — click to add vertices, close on first-vertex click or Enter
 // -------------------------------------------------------
 const poly = {
@@ -1230,7 +1412,11 @@ function closePolygon() {
 
   clearPolyPreview();
 
+  const _polyMinX = Math.min(...points.map(p => p.x));
+  const _polyMinY = Math.min(...points.map(p => p.y));
   const polyObj = new fabric.Polygon(points, {
+    left: _polyMinX,
+    top:  _polyMinY,
     fill: '#ffffff', stroke: '#1a1a1a', strokeWidth: WALL_WIDTH,
     strokeUniform: true, lockScalingFlip: true,
     objectCaching: false,
@@ -1555,7 +1741,7 @@ let doorSubtype = 'swing'; // 'swing' | 'bifold' | 'double-bifold'
 
 const doorTool = { state: 0, pt1: null, pt2: null, linePreview: null, shapePreview: null };
 
-// pt1, pt2: door opening endpoints; mousePt: determines hinge side & swing direction
+// pt1, pt2: door opening endpoints; mousePt: determines hinge side, swing direction & open angle
 function _getDoorPath(pt1, pt2, mousePt) {
   const dx = pt2.x - pt1.x, dy = pt2.y - pt1.y;
   const len = Math.hypot(dx, dy);
@@ -1566,8 +1752,8 @@ function _getDoorPath(pt1, pt2, mousePt) {
 
   // Which end is the hinge?
   const t = (mousePt.x - pt1.x) * d.x + (mousePt.y - pt1.y) * d.y;
-  const hinge    = t < len / 2 ? pt1 : pt2;
-  const dFromH   = t < len / 2 ? d : { x: -d.x, y: -d.y };
+  const hinge  = t < len / 2 ? pt1 : pt2;
+  const dFromH = t < len / 2 ? d : { x: -d.x, y: -d.y };
 
   // Which side does the door swing?
   const s = (mousePt.x - mid.x) * perp.x + (mousePt.y - mid.y) * perp.y;
@@ -1674,20 +1860,35 @@ function cancelDoorDraw() {
   canvas.renderAll();
 }
 
+// 壁上の投影点をグリッド単位にスナップする
+// 水平壁→x スナップ、垂直壁→y スナップ、斜め壁→弧長を GRID_SIZE 刻みでスナップ
+function _snapPtOnWall(p1, p2, rawPt) {
+  const dx = p2.x - p1.x, dy = p2.y - p1.y;
+  const t  = Math.max(0, Math.min(1, projectOntoSegment(rawPt, p1, p2)));
+  const pt = ptOnSegment(p1, p2, t);
+  if (Math.abs(dy) < 1) {          // 水平壁
+    return { x: snap(pt.x), y: pt.y };
+  } else if (Math.abs(dx) < 1) {   // 垂直壁
+    return { x: pt.x, y: snap(pt.y) };
+  } else {                          // 斜め壁
+    const len = Math.hypot(dx, dy);
+    const snappedT = Math.max(0, Math.min(1, snap(t * len) / len));
+    return ptOnSegment(p1, p2, snappedT);
+  }
+}
+
 function handleDoorDown(rawPt) {
   if (doorTool.state === 0) {
     const hit = findNearestWallOrEdge(rawPt);
     if (!hit) return;
-    const t = projectOntoSegment(rawPt, hit.p1, hit.p2);
-    const pt = ptOnSegment(hit.p1, hit.p2, t);
+    const pt = _snapPtOnWall(hit.p1, hit.p2, rawPt);
     doorTool.pt1 = pt;
     doorTool.state = 1;
 
   } else if (doorTool.state === 1) {
     const hit = findNearestWallOrEdge(rawPt);
     if (!hit) return;
-    const t = projectOntoSegment(rawPt, hit.p1, hit.p2);
-    const pt = ptOnSegment(hit.p1, hit.p2, t);
+    const pt = _snapPtOnWall(hit.p1, hit.p2, rawPt);
     doorTool.pt2 = pt;
     doorTool.state = 2;
     _doorUpdateShapePreview(rawPt);
@@ -1711,7 +1912,7 @@ function handleDoorMove(rawPt) {
     if (doorTool.linePreview) canvas.remove(doorTool.linePreview);
     const hit = findNearestWallOrEdge(rawPt);
     const pt = hit
-      ? ptOnSegment(hit.p1, hit.p2, projectOntoSegment(rawPt, hit.p1, hit.p2))
+      ? _snapPtOnWall(hit.p1, hit.p2, rawPt)
       : { x: snap(rawPt.x), y: snap(rawPt.y) };
     doorTool.linePreview = new fabric.Line(
       [doorTool.pt1.x, doorTool.pt1.y, pt.x, pt.y],
@@ -2062,7 +2263,21 @@ function handleModifyDown(rawPt, type) {
     // 終点も辺上グリッド点にスナップ
     const snapN = _snapToEdgeGridPoint(rawPt, modTool.room);
 
-    if (snapN && modTool.freePts.length >= 1) {
+    // 確定条件: 辺上スナップ && 自由点が1つ以上 && 最後の自由点→ptN が軸平行
+    // ・削る: 削り先の内側辺への誤スナップ確定防止のため同じ辺のみ許可
+    // ・出す: コーナーをまたぐ操作を許可するため異なる辺も確定可
+    // ・軸平行チェック: 1グリッド操作で斜め確定するのを防ぐ
+    const lastFreePt = modTool.freePts.length > 0
+      ? modTool.freePts[modTool.freePts.length - 1]
+      : null;
+    const shouldConfirm = snapN && modTool.freePts.length >= 1 && (() => {
+      if (modTool.type === 'indent' && snapN.edgeIdx !== modTool.edge1) return false;  // 削る: 同じ辺のみ
+      const dx = Math.abs(snapN.x - lastFreePt.x);
+      const dy = Math.abs(snapN.y - lastFreePt.y);
+      return dx < 1 || dy < 1;  // 水平または垂直のみ確定OK
+    })();
+
+    if (shouldConfirm) {
       const ptN  = { x: snapN.x, y: snapN.y };
       const edgeN = snapN.edgeIdx;
       const { room, pt1, edge1, freePts, type } = modTool;
@@ -2177,8 +2392,19 @@ function _applyRoomModification(room, pt1, edge1, freePts, ptN, edgeN) {
   // 全頂点をグリッドに丸めて浮動小数点誤差を除去
   const snappedVerts = newVerts.map(v => ({ x: snap(v.x), y: snap(v.y) }));
 
+  // 自己交差チェック — 削り先に辺がある等でポリゴンが崩れる操作を中止
+  if (!_isSimplePolygon(snappedVerts)) return;
+
+  // Fabric.js は new fabric.Polygon(points) 生成時に
+  // left = minX - strokeWidth/2, top = minY - strokeWidth/2 と自動補正するため、
+  // 明示的に left/top を渡すことで strokeWidth/2 分のズレを防ぐ
+  const _minX = Math.min(...snappedVerts.map(v => v.x));
+  const _minY = Math.min(...snappedVerts.map(v => v.y));
+
   // 新しいポリゴンを作成（プロパティを引き継ぐ）
   const newRoom = new fabric.Polygon(snappedVerts, {
+    left: _minX,
+    top:  _minY,
     fill:            room.fill  || '#ffffff',
     stroke:          room.stroke || '#1a1a1a',
     strokeWidth:     room.strokeWidth || WALL_WIDTH,
@@ -2260,6 +2486,34 @@ function projectOntoSegment(pt, p1, p2) {
 
 function ptOnSegment(p1, p2, t) {
   return { x: p1.x + t * (p2.x - p1.x), y: p1.y + t * (p2.y - p1.y) };
+}
+
+// 2D外積 (q - o) × (p - o)
+function _cross2D(o, a, b) {
+  return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+
+// 2線分が端点を除いて交差するか（厳密交差判定）
+function _segmentsIntersectStrict(p1, p2, q1, q2) {
+  const d1 = _cross2D(q1, q2, p1), d2 = _cross2D(q1, q2, p2);
+  const d3 = _cross2D(p1, p2, q1), d4 = _cross2D(p1, p2, q2);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+         ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+
+// ポリゴンが自己交差していないか（単純多角形チェック）
+function _isSimplePolygon(verts) {
+  const n = verts.length;
+  if (n < 3) return false;
+  for (let i = 0; i < n; i++) {
+    const a1 = verts[i], a2 = verts[(i + 1) % n];
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue; // 隣接辺は端点を共有するためスキップ
+      const b1 = verts[j], b2 = verts[(j + 1) % n];
+      if (_segmentsIntersectStrict(a1, a2, b1, b2)) return false;
+    }
+  }
+  return true;
 }
 
 // 壁（Line）または部屋の辺（Rect）のうち最も近いものを返す
@@ -2793,6 +3047,7 @@ canvas.on('mouse:down', (e) => {
     if (doorTool.state > 0)  { cancelDoorDraw();   setTool('select'); return; }
     if (poly.active)         { cancelPolyDraw();   setTool('select'); return; }
     if (modTool.room)        { cancelModifyDraw(); setTool('select'); return; }
+    if (lineTool.active)     { cancelLineDraw();   setTool('select'); return; }
     if (draw.active)         { cancelDrawing();    setTool('select'); return; }
   }
   // Middle-mouse / Alt+drag pan
@@ -2816,6 +3071,10 @@ canvas.on('mouse:down', (e) => {
       break;
     case 'wall':
       if (!e.target) startWallDraw(pt);
+      break;
+    case 'line':
+      if (!lineTool.active) startLineDraw(pt);
+      else finishLineDraw(pt);
       break;
     case 'door':
       handleDoorDown(canvas.getPointer(e.e));
@@ -2867,6 +3126,7 @@ canvas.on('mouse:move', (e) => {
   if (currentTool === 'room' || currentTool === 'cl-room') updateRoomDraw(pt);
   if (currentTool === 'wet-room') updateWetRoomDraw(pt);
   if (currentTool === 'wall')     updateWallDraw(pt);
+  if (currentTool === 'line')     updateLineDraw(pt);
   if (currentTool === 'indent' || currentTool === 'protrude') handleModifyMove(canvas.getPointer(e.e));
   if (currentTool === 'door')     handleDoorMove(canvas.getPointer(e.e));
   if (currentTool === 'window')   updateWindowDraw(canvas.getPointer(e.e));
@@ -3355,7 +3615,7 @@ document.addEventListener('keydown', (e) => {
     if (k === 's') { e.preventDefault(); saveProject(); return; }
   }
 
-  const keyMap = { v:'select', r:'room', p:'poly', w:'wall', d:'door', n:'window', s:'stairs', t:'text' };
+  const keyMap = { v:'select', r:'room', p:'poly', w:'wall', d:'door', n:'window', s:'stairs', t:'text', l:'line' };
   if (keyMap[k] && !e.ctrlKey) { setTool(keyMap[k]); return; }
 
   // [ / ] で 90° 回転、0 で水平/垂直に正規化
