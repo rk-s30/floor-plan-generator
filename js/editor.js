@@ -196,6 +196,28 @@ function loadState(jsonStr) {
         o.set({ lockScalingY: true });
         o.setControlsVisibility({ mt: false, mb: false, tl: false, tr: false, bl: false, br: false });
       }
+      // 線：端点コントロールを再適用（JSON復元で controls は失われるため）
+      if (o.data?.type === 'annotation-line') {
+        // Path (arrow/double) で localPt1/2 が無い旧セーブデータを補完
+        if (o.type === 'path' && (!o.data.localPt1 || !o.data.localPt2)) {
+          const mCmds = o.path.filter(c => c[0] === 'M');
+          const lCmds = o.path.filter(c => c[0] === 'L');
+          if (mCmds.length >= 2 && lCmds.length >= 2) {
+            // 二重線: 2本の平行パスの平均を元の端点とする
+            const p1x = (mCmds[0][1] + mCmds[1][1]) / 2;
+            const p1y = (mCmds[0][2] + mCmds[1][2]) / 2;
+            const p2x = (lCmds[0][1] + lCmds[1][1]) / 2;
+            const p2y = (lCmds[0][2] + lCmds[1][2]) / 2;
+            o.data.localPt1 = { x: p1x - o.pathOffset.x, y: p1y - o.pathOffset.y };
+            o.data.localPt2 = { x: p2x - o.pathOffset.x, y: p2y - o.pathOffset.y };
+          } else if (mCmds.length >= 1 && lCmds.length >= 1) {
+            // 矢印
+            o.data.localPt1 = { x: mCmds[0][1] - o.pathOffset.x, y: mCmds[0][2] - o.pathOffset.y };
+            o.data.localPt2 = { x: lCmds[0][1] - o.pathOffset.x, y: lCmds[0][2] - o.pathOffset.y };
+          }
+        }
+        applyAnnotationLineControls(o);
+      }
     });
     drawGrid();
     updateObjectCount();
@@ -956,6 +978,17 @@ canvas.on('object:modified', (e) => {
     return;
   }
 
+  // 線（annotation-line）: 移動時のみ中心位置スナップ、端点ドラッグは既に処理済み
+  if (obj.data?.type === 'annotation-line') {
+    if ((e.action || '') === 'drag' && snapEnabled && !obj.data?.snapDisabled) {
+      obj.set({ left: snap(obj.left), top: snap(obj.top) });
+      canvas.renderAll();
+    }
+    updatePropsPanel();
+    saveHistory();
+    return;
+  }
+
   // 部屋・壁はスナップ設定に関わらず常にグリッドスナップ
   const _forceSnap = obj.data?.type === 'room' || obj.data?.type === 'wall';
   if ((snapEnabled || _forceSnap) && !obj.data?.snapDisabled) {
@@ -995,9 +1028,11 @@ canvas.on('object:modified', (e) => {
         });
       }
 
-      // サイズスナップ（Line・テキスト・窓以外）
+      // サイズスナップ（Line・テキスト・窓・annotation-line以外、かつスケール操作時のみ）
+      const action = e.action || '';
       if (obj.type !== 'line' && obj.type !== 'i-text' && obj.type !== 'text'
-          && obj.data?.type !== 'window') {
+          && obj.data?.type !== 'window' && obj.data?.type !== 'annotation-line'
+          && action.startsWith('scale')) {
         const snappedW = Math.max(snap(obj.getScaledWidth()),  MIN_ROOM_SIZE);
         const snappedH = Math.max(snap(obj.getScaledHeight()), MIN_ROOM_SIZE);
         obj.set({
@@ -1114,6 +1149,87 @@ function applyWallControls(line) {
 }
 
 // -------------------------------------------------------
+// Annotation-line endpoint controls
+// 壁コントロールと同方式: scaleX/Y を使わず端点を直接操作することで
+// ドラッグ中のstrokeUniform誤補正による太さ変化を根本解消
+// -------------------------------------------------------
+function _annotLinePositionHandler(which) {
+  return function(dim, finalMatrix, obj) {
+    let lx, ly;
+    if (obj.type === 'line') {
+      const p = obj.calcLinePoints();
+      lx = which === 1 ? p.x1 : p.x2;
+      ly = which === 1 ? p.y1 : p.y2;
+    } else {
+      const lp = which === 1 ? obj.data?.localPt1 : obj.data?.localPt2;
+      lx = lp ? lp.x : 0;
+      ly = lp ? lp.y : 0;
+    }
+    const vpt = (obj.canvas && obj.canvas.viewportTransform) || [1,0,0,1,0,0];
+    return fabric.util.transformPoint(
+      { x: lx, y: ly },
+      fabric.util.multiplyTransformMatrices(vpt, obj.calcTransformMatrix())
+    );
+  };
+}
+
+function _annotLineActionHandler(which) {
+  return function(eventData, transform, x, y) {
+    const obj = transform.target;
+    const sx = snap(x), sy = snap(y);
+    if (obj.type === 'line') {
+      if (which === 1) { obj.set({ x1: sx, y1: sy }); }
+      else             { obj.set({ x2: sx, y2: sy }); }
+      obj._setWidthHeight();
+    } else {
+      // Path (arrow / double): 相手端点の現在キャンバス位置を求めてパスを再構築
+      const t = obj.calcTransformMatrix();
+      const otherLp = which === 1 ? obj.data?.localPt2 : obj.data?.localPt1;
+      const otherPt = otherLp
+        ? fabric.util.transformPoint(otherLp, t)
+        : { x: obj.left, y: obj.top };
+      const pt1 = which === 1 ? { x: sx, y: sy } : otherPt;
+      const pt2 = which === 2 ? { x: sx, y: sy } : otherPt;
+      const subtype = obj.data.subtype;
+      const newStr = subtype === 'double'
+        ? _buildDoublePathStr(pt1.x, pt1.y, pt2.x, pt2.y)
+        : _buildArrowPathStr(pt1.x, pt1.y, pt2.x, pt2.y, subtype === 'arrow-both');
+      obj.path = fabric.util.parsePath(newStr);
+      obj._setPositionDimensions({});
+      obj.set({ angle: 0, scaleX: 1, scaleY: 1 });
+      // 逆行列変換でローカル座標を確実に求める（Fabric.js の Path は left と pathOffset の
+      // 関係がバージョン依存のため、直接変換が最も確実）
+      const invT = fabric.util.invertTransform(obj.calcTransformMatrix());
+      obj.data.localPt1 = fabric.util.transformPoint(pt1, invT);
+      obj.data.localPt2 = fabric.util.transformPoint(pt2, invT);
+    }
+    obj.setCoords();
+    return true;
+  };
+}
+
+const ANNOT_LINE_EP_CONTROLS = {
+  ep1: new fabric.Control({
+    x: 0, y: 0, cursorStyle: 'crosshair',
+    actionName:      'modifyAnnotLineEndpoint',
+    positionHandler: _annotLinePositionHandler(1),
+    actionHandler:   _annotLineActionHandler(1),
+    render: function(ctx, left, top) { _renderWallHandle(ctx, left, top); },
+  }),
+  ep2: new fabric.Control({
+    x: 0, y: 0, cursorStyle: 'crosshair',
+    actionName:      'modifyAnnotLineEndpoint',
+    positionHandler: _annotLinePositionHandler(2),
+    actionHandler:   _annotLineActionHandler(2),
+    render: function(ctx, left, top) { _renderWallHandle(ctx, left, top); },
+  }),
+};
+
+function applyAnnotationLineControls(obj) {
+  obj.controls = ANNOT_LINE_EP_CONTROLS;
+}
+
+// -------------------------------------------------------
 // Wall — drag to draw a single line segment
 // -------------------------------------------------------
 function startWallDraw(pt) {
@@ -1215,6 +1331,13 @@ function _buildArrowPathStr(x1, y1, x2, y2, bothEnds) {
   return path;
 }
 
+function _buildDoublePathStr(x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len = Math.hypot(dx, dy);
+  const px = -(dy / len) * 3, py = (dx / len) * 3;
+  return `M ${x1+px} ${y1+py} L ${x2+px} ${y2+py} M ${x1-px} ${y1-py} L ${x2-px} ${y2-py}`;
+}
+
 function _getLineDashArray(subtype) {
   if (subtype === 'dashed') return [10, 5];
   if (subtype === 'dotted') return [2, 6];
@@ -1231,7 +1354,7 @@ function startLineDraw(pt) {
     selectable: false, evented: false, _isPreview: true,
   });
   const previewLine = new fabric.Line([pt.x, pt.y, pt.x, pt.y], {
-    stroke: LINE_COLOR, strokeWidth: LINE_WIDTH,
+    stroke: '#f97316', strokeWidth: LINE_WIDTH,
     strokeDashArray: [6, 4],
     selectable: false, evented: false, _isPreview: true,
   });
@@ -1274,27 +1397,26 @@ function finishLineDraw(pt) {
       data: { type: 'annotation-line', subtype: lineSubtype },
       _uid: uid(),
     });
+    // 端点コントロール用にローカル座標を保持（逆行列で正確に変換）
+    const invT0a = fabric.util.invertTransform(lineObj.calcTransformMatrix());
+    lineObj.data.localPt1 = fabric.util.transformPoint({ x: x1, y: y1 }, invT0a);
+    lineObj.data.localPt2 = fabric.util.transformPoint({ x: x2, y: y2 }, invT0a);
   } else if (lineSubtype === 'double') {
-    // Two parallel lines — build as a group
-    const dx = x2 - x1, dy = y2 - y1;
-    const len = Math.hypot(dx, dy);
-    const px = -(dy / len) * 3, py = (dx / len) * 3;
-    const l1 = new fabric.Line([x1 + px, y1 + py, x2 + px, y2 + py], {
+    // 二重線: Group ではなく Path として作成（端点コントロールと strokeUniform が一貫動作）
+    const pathStr = _buildDoublePathStr(x1, y1, x2, y2);
+    lineObj = new fabric.Path(pathStr, {
       stroke: LINE_COLOR, strokeWidth: LINE_WIDTH,
-      strokeLineCap: 'round', strokeUniform: true,
-      selectable: false, evented: false,
-    });
-    const l2 = new fabric.Line([x1 - px, y1 - py, x2 - px, y2 - py], {
-      stroke: LINE_COLOR, strokeWidth: LINE_WIDTH,
-      strokeLineCap: 'round', strokeUniform: true,
-      selectable: false, evented: false,
-    });
-    lineObj = new fabric.Group([l1, l2], {
+      fill: 'transparent',
+      strokeLineCap: 'round',
+      strokeUniform: true,
       selectable: true, evented: true,
       hasControls: true,
       data: { type: 'annotation-line', subtype: 'double' },
       _uid: uid(),
     });
+    const invT0b = fabric.util.invertTransform(lineObj.calcTransformMatrix());
+    lineObj.data.localPt1 = fabric.util.transformPoint({ x: x1, y: y1 }, invT0b);
+    lineObj.data.localPt2 = fabric.util.transformPoint({ x: x2, y: y2 }, invT0b);
   } else {
     // solid / dashed / dotted
     const dashArray = _getLineDashArray(lineSubtype);
@@ -1310,11 +1432,13 @@ function finishLineDraw(pt) {
     });
   }
 
+  applyAnnotationLineControls(lineObj);
   canvas.add(lineObj);
   canvas.setActiveObject(lineObj);
   updateObjectCount();
   canvas.renderAll();
   saveHistory();
+  setTool('select');
 }
 
 function cancelLineDraw() {
@@ -1326,6 +1450,8 @@ function cancelLineDraw() {
   lineTool.preview = null;
   lineTool.startPt = null;
 }
+
+
 
 // -------------------------------------------------------
 // Polygon room tool — click to add vertices, close on first-vertex click or Enter
@@ -2110,6 +2236,23 @@ function _pointInPolygon(pt, polyPts) {
   return inside;
 }
 
+// 点が指定辺の「内側」にあるか（ポリゴンの巻き方向から内向き法線を求める）
+// 凹ポリゴンでも辺単体の内向き判定が正しく動く
+function _isInsideOfEdge(pt, verts, edgeIdx) {
+  const n = verts.length;
+  // 符号付き面積でポリゴンの巻き方向を判定
+  let area2 = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area2 += verts[i].x * verts[j].y - verts[j].x * verts[i].y;
+  }
+  const v1 = verts[edgeIdx], v2 = verts[(edgeIdx + 1) % n];
+  const ex = v2.x - v1.x, ey = v2.y - v1.y;
+  // cross > 0 → pt は辺の左側（CCW ポリゴンでは内側）
+  const cross = ex * (pt.y - v1.y) - ey * (pt.x - v1.x);
+  return area2 > 0 ? cross > 0 : cross < 0;
+}
+
 // 指定部屋の最近傍辺を返す（閾値内のみ）
 function _findEdgeOnRoom(rawPt, room) {
   const threshold = 16 / canvas.getZoom();
@@ -2290,12 +2433,12 @@ function handleModifyDown(rawPt, type) {
       setTool('select');
     } else {
       // 自由点追加 — 削る=内側・出す=外側 のみ受け付ける
-      // 方向チェックはスナップ前の生座標で行う（スナップで壁上に乗ると境界判定がずれるため）
+      // 削る: _pointInPolygon は凹ポリゴンの欠き込み内壁で誤判定するため edge1 法線ベースで判定
+      // 出す: pt1 がコーナーの場合 edge1 の半平面が広すぎて後続点を誤拒否するため全体内外判定を使う
       const pt = { x: snap(rawPt.x), y: snap(rawPt.y) };
       const verts = getRoomCanvasPoints(modTool.room);
-      const isInside = _pointInPolygon(rawPt, verts);
-      if (modTool.type === 'indent'   && !isInside) return;  // 削る: 外側は無効
-      if (modTool.type === 'protrude' &&  isInside) return;  // 出す: 内側は無効
+      if (modTool.type === 'indent' && !_isInsideOfEdge(rawPt, verts, modTool.edge1)) return;
+      if (modTool.type === 'protrude' && _pointInPolygon(rawPt, verts)) return;
 
       const prevPt = modTool.freePts.length === 0 ? modTool.pt1 : modTool.freePts[modTool.freePts.length - 1];
       modTool.freePts.push(pt);
@@ -3268,7 +3411,7 @@ const $typeBadge         = document.getElementById('prop-type-badge');
 const TYPE_LABELS = {
   room: '部屋', wall: '壁', door: 'ドア',
   window: '窓', stairs: '階段', text: 'テキスト',
-  'room-label': 'ラベル',
+  'room-label': 'ラベル', 'annotation-line': '線',
   toilet: 'トイレ', bathtub: 'バスタブ', sink: '流し台',
   refrigerator: '冷蔵庫', washer: '洗濯機', stove: 'コンロ', kitchen: 'キッチン', counter: '台',
 };
@@ -3328,6 +3471,14 @@ function updatePropsPanel() {
     document.getElementById(id).style.display = isStairs ? 'none' : '';
   });
 
+  // 線フィールド（annotation-line のみ表示）
+  const isAnnotationLine = objType === 'annotation-line';
+  document.getElementById('prop-line-fields').style.display = isAnnotationLine ? 'block' : 'none';
+  if (isAnnotationLine) {
+    const sw = obj.strokeWidth ?? LINE_WIDTH;
+    document.getElementById('prop-line-thickness').value = Math.round(sw);
+  }
+
   // Per-object snap toggle
   const snapDisabled = obj.data?.snapDisabled || false;
   const $snapToggle = document.getElementById('prop-snap-toggle');
@@ -3335,8 +3486,9 @@ function updatePropsPanel() {
   $snapToggle.checked    = !snapDisabled;
   $snapLabel.textContent = snapDisabled ? 'OFF' : 'ON';
 
-  // 壁は塗りつぶしなし（Line に fill は不要）
-  document.getElementById('prop-fill-group').style.display = objType === 'wall' ? 'none' : '';
+  // 壁は塗りつぶしなし（annotation-line も fill 不要）
+  document.getElementById('prop-fill-group').style.display =
+    (objType === 'wall' || isAnnotationLine) ? 'none' : '';
 
   // Swatches（階段グループは子オブジェクトから色を読み取る）
   const _swatchFill   = obj.data?.type === 'stairs'
@@ -3357,6 +3509,16 @@ function clearPropsPanel() {
     document.getElementById(id).style.display = '';
   });
 }
+
+// 線の太さ変更
+document.getElementById('prop-line-thickness').addEventListener('change', () => {
+  const obj = canvas.getActiveObject();
+  if (!obj || obj.data?.type !== 'annotation-line') return;
+  const val = Math.max(1, parseInt(document.getElementById('prop-line-thickness').value) || 1);
+  obj.set({ strokeWidth: val });
+  canvas.renderAll();
+  saveHistory();
+});
 
 // Returns the room rect whether the selection is the rect itself or its label
 function getActiveRoom() {
