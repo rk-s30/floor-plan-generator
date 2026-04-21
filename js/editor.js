@@ -97,11 +97,8 @@ fabric.Object.prototype.set({
   borderScaleFactor: 1.5,
   padding:           4,
 });
-// 回転ハンドルも同系色
-fabric.Object.prototype.controls.mtr && Object.assign(
-  fabric.Object.prototype.controls.mtr,
-  { cursorStyle: 'crosshair' }
-);
+// 回転ハンドルを非表示
+delete fabric.Object.prototype.controls.mtr;
 // マルチ選択矩形
 canvas.selectionColor       = 'rgba(217,119,6,0.06)';
 canvas.selectionBorderColor = '#d97706';
